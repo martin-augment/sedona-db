@@ -34,15 +34,15 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::index::SpatialIndex;
-use crate::once_fut::{OnceAsync, OnceFut};
 use crate::operand_evaluator::{
     create_operand_evaluator, distance_value_at, EvaluatedGeometryArray, OperandEvaluator,
 };
 use crate::spatial_predicate::SpatialPredicate;
-use crate::utils::{
+use crate::utils::join_utils::{
     adjust_indices_by_join_type, apply_join_filter_to_indices, build_batch_from_indices,
     get_final_indices_from_bit_map, need_produce_result_in_final,
 };
+use crate::utils::once_fut::{OnceAsync, OnceFut};
 use arrow::array::RecordBatch;
 use arrow::datatypes::{Schema, SchemaRef};
 use sedona_common::option::SpatialJoinOptions;
@@ -151,7 +151,7 @@ impl SpatialJoinProbeMetrics {
                 .counter("probe_input_batches", partition),
             probe_input_rows: MetricBuilder::new(metrics).counter("probe_input_rows", partition),
             output_batches: MetricBuilder::new(metrics).counter("output_batches", partition),
-            output_rows: MetricBuilder::new(metrics).counter("output_rows", partition),
+            output_rows: MetricBuilder::new(metrics).output_rows(partition),
             join_result_candidates: MetricBuilder::new(metrics)
                 .counter("join_result_candidates", partition),
             join_result_count: MetricBuilder::new(metrics).counter("join_result_count", partition),
@@ -462,8 +462,6 @@ pub(crate) struct SpatialJoinBatchIterator {
     geom_array: EvaluatedGeometryArray,
     /// Current probe row index being processed
     current_probe_idx: usize,
-    /// Current rect index being processed
-    current_rect_idx: usize,
     /// Join metrics for tracking performance
     join_metrics: SpatialJoinProbeMetrics,
     /// Maximum batch size before yielding a result
@@ -501,7 +499,6 @@ impl SpatialJoinBatchIterator {
             probe_batch: params.probe_batch,
             geom_array: params.geom_array,
             current_probe_idx: 0,
-            current_rect_idx: 0,
             join_metrics: params.join_metrics,
             max_batch_size: params.max_batch_size,
             probe_side_ordered: params.probe_side_ordered,
@@ -575,22 +572,11 @@ impl SpatialJoinBatchIterator {
                     self.join_metrics
                         .join_result_count
                         .add(join_result_metrics.count);
-
-                    // Skip all rects for this probe index since KNN doesn't use them
-                    while self.current_rect_idx < rects.len()
-                        && rects[self.current_rect_idx].0 == self.current_probe_idx
-                    {
-                        self.current_rect_idx += 1;
-                    }
                 }
                 _ => {
                     // Regular spatial join: process all rects for this probe index
-                    while self.current_rect_idx < rects.len()
-                        && rects[self.current_rect_idx].0 == self.current_probe_idx
-                    {
-                        let rect = &rects[self.current_rect_idx].1;
-                        self.current_rect_idx += 1;
-
+                    let rect_opt = &rects[self.current_probe_idx];
+                    if let Some(rect) = rect_opt {
                         let join_result_metrics = self.spatial_index.query(
                             wkb,
                             rect,
@@ -837,7 +823,6 @@ impl std::fmt::Debug for SpatialJoinBatchIterator {
         f.debug_struct("SpatialJoinBatchIterator")
             .field("max_batch_size", &self.max_batch_size)
             .field("current_probe_idx", &self.current_probe_idx)
-            .field("current_rect_idx", &self.current_rect_idx)
             .field("is_complete", &self.is_complete)
             .field(
                 "build_batch_positions_len",

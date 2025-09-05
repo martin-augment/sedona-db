@@ -15,19 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod build_index;
-mod collect;
-pub mod exec;
-mod index;
-pub mod operand_evaluator;
-pub mod optimizer;
-pub mod refine;
-pub mod spatial_predicate;
-mod stream;
-pub mod utils;
+use datafusion_execution::memory_pool::MemoryReservation;
+use sedona_expr::statistics::GeoStatistics;
 
-pub use exec::SpatialJoinExec;
-pub use optimizer::register_spatial_join_optimizer;
+mod build_side_batch;
+mod build_side_batch_stream;
+mod build_side_collector;
 
-// Re-export option types from sedona-common for convenience
-pub use sedona_common::option::*;
+pub(crate) use build_side_batch::BuildSideBatch;
+pub(crate) use build_side_batch_stream::SendableBuildSideBatchStream;
+pub(crate) use build_side_collector::{BuildSideBatchesCollector, CollectBuildSideMetrics};
+
+pub(crate) struct BuildPartition {
+    pub build_side_batch_stream: SendableBuildSideBatchStream,
+    pub geo_statistics: GeoStatistics,
+
+    /// Memory reservation for tracking the memory usage of the build partition
+    /// Cleared on `BuildPartition` drop
+    pub reservation: MemoryReservation,
+}
