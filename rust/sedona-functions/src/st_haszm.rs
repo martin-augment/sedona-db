@@ -158,6 +158,10 @@ fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
         // If empty geometry (num_geometries == 0), fallback to below logic to check the geom collection's dimension
         // GEOMETRY COLLECTION Z EMPTY hasz -> true
     }
+
+    // TODO: Last check: check how many dimensions the 1st coordinate has (all other coordinates must have the same)
+    // e.g handle this case: POINT (0 0 0) -> xyz dimension
+
     // If code was unspecified / xy and we couldn't infer the dimension, it must be xy
     Ok(Some(false))
 }
