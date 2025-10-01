@@ -16,7 +16,7 @@
 // under the License.
 use std::sync::Arc;
 
-use crate::executor::WkbExecutor;
+use crate::executor::WkbBytesExecutor;
 use arrow_array::builder::BooleanBuilder;
 use arrow_schema::DataType;
 use datafusion_common::error::Result;
@@ -90,13 +90,13 @@ impl SedonaScalarKernel for STHasZm {
             _ => unreachable!(),
         };
 
-        let executor = WkbExecutor::new(arg_types, args);
+        let executor = WkbBytesExecutor::new(arg_types, args);
         let mut builder = BooleanBuilder::with_capacity(executor.num_iterations());
 
         executor.execute_wkb_void(|maybe_item| {
             match maybe_item {
                 Some(item) => {
-                    builder.append_option(invoke_scalar(&item, dim_index)?);
+                    builder.append_option(infer_haszm(&item, dim_index)?);
                 }
                 None => builder.append_null(),
             }
@@ -107,28 +107,59 @@ impl SedonaScalarKernel for STHasZm {
     }
 }
 
-fn invoke_scalar(item: &Wkb, dim_index: usize) -> Result<Option<bool>> {
-    match item.as_type() {
-        geo_traits::GeometryType::GeometryCollection(collection) => {
-            use geo_traits::GeometryCollectionTrait;
-            if collection.num_geometries() == 0 {
-                Ok(Some(false))
-            } else {
-                // PostGIS doesn't allow creating a GeometryCollection with geometries of different dimensions
-                // so we can just check the dimension of the first one
-                let first_geom = unsafe { collection.geometry_unchecked(0) };
-                invoke_scalar(first_geom, dim_index)
-            }
-        }
-        _ => {
-            let geom_dim = item.dim();
-            match dim_index {
-                2 => Ok(Some(matches!(geom_dim, Dimensions::Xyz | Dimensions::Xyzm))),
-                3 => Ok(Some(matches!(geom_dim, Dimensions::Xym | Dimensions::Xyzm))),
-                _ => sedona_internal_err!("unexpected dim_index"),
-            }
-        }
+/// Fast-path inference of geometry type name from raw WKB bytes
+/// An error will be thrown for invalid WKB bytes input
+///
+/// Spec: https://libgeos.org/specifications/wkb/
+fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
+    if buf.len() < 5 {
+        return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
     }
+
+    let byte_order = buf[0];
+    let code = match byte_order {
+        0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        other => return sedona_internal_err!("Unexpected byte order: {other}"),
+    };
+
+    // 0000 -> xy or unspecified
+    // 1000 -> xyz
+    // 2000 -> xym
+    // 3000 -> xyzm
+    match code / 1000 {
+        // If xy, it's possible we need to infer the dimension
+        0 => {},
+        1 => return Ok(Some(dim_index == 2)),
+        2 => return Ok(Some(dim_index == 3)),
+        3 => return Ok(Some(true)),
+        _ => return sedona_internal_err!("Unexpected code: {code}"),
+    };
+
+    // If GeometryCollection (7), we need to check the dimension of the next geometry
+    if code & 0x7 == 7 {
+        // The next 4 bytes are the number of geometries in the collection
+        let num_geometries = match byte_order {
+            0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
+            1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
+            other => return sedona_internal_err!("Unexpected byte order: {other}"),
+        };
+        // Check the dimension of the first geometry since they all have to be the same dimension
+        // Note: Attempting to create the following geometries error and are thus not possible to create:
+        // - Nested geometry dimension doesn't match the **specified** geom collection z-dimension
+        //   - GEOMETRYCOLLECTION M (POINT Z (1 1 1))
+        // - Nested geometry doesn't have the specified dimension
+        //   - GEOMETRYCOLLECTION Z (POINT (1 1))
+        // - Nested geometries have different dimensions
+        //   - GEOMETRYCOLLECTION (POINT Z (1 1 1), POINT (1 1))
+        if num_geometries >= 1 {
+            return infer_haszm(&buf[9..], dim_index);
+        }
+        // If empty geometry (num_geometries == 0), fallback to below logic to check the geom collection's dimension
+        // GEOMETRY COLLECTION Z EMPTY hasz -> true
+    }
+    // If code was unspecified / xy and we couldn't infer the dimension, it must be xy
+    Ok(Some(false))
 }
 
 #[cfg(test)]
@@ -172,6 +203,16 @@ mod tests {
         let result = m_tester.invoke_scalar("POINT (1 2)").unwrap();
         m_tester.assert_scalar_result_equals(result, false);
 
+        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
+        // Infer z-dimension
+        // let result = z_tester.invoke_scalar("POINT (1 2 3)").unwrap();
+        // z_tester.assert_scalar_result_equals(result, true);
+
+        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
+        // Infer z-dimension
+        // let result = m_tester.invoke_scalar("POINT (1 2 3)").unwrap();
+        // m_tester.assert_scalar_result_equals(result, false);
+
         let result = z_tester.invoke_scalar("POINT M (1 2 3)").unwrap();
         z_tester.assert_scalar_result_equals(result, false);
 
@@ -184,10 +225,26 @@ mod tests {
         let result = m_tester.invoke_wkb_scalar(None).unwrap();
         m_tester.assert_scalar_result_equals(result, ScalarValue::Null);
 
+        // Z-dimension specified only in the nested geometry, but not the geom collection level
         let result = z_tester
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION (POINT Z (1 2 3))"))
             .unwrap();
         z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
+
+        // Z-dimension specified on both the geom collection and nested geometry level
+        // Geometry collection with Z dimension both on the geom collection and nested geometry level
+        let result = z_tester
+            .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION Z (POINT Z (1 2 3))"))
+            .unwrap();
+        z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
+
+        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
+        // Z-dimension specified only on the geom collection level but not the nested geometry level
+        // Geometry collection with Z dimension both on the geom collection and nested geometry level
+        // let result = z_tester
+        //     .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION Z (POINT (1 2 3))"))
+        //     .unwrap();
+        // z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
 
         let result = m_tester
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION (POINT M (1 2 3))"))
@@ -203,5 +260,16 @@ mod tests {
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION EMPTY"))
             .unwrap();
         m_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(false)));
+
+        // Empty geometry collections with Z or M dimensions
+        let result = z_tester
+            .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION Z EMPTY"))
+            .unwrap();
+        z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
+
+        let result = m_tester
+            .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION M EMPTY"))
+            .unwrap();
+        m_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
     }
 }
