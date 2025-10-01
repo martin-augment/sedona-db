@@ -129,7 +129,7 @@ fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     // 3000 -> xyzm
     match code / 1000 {
         // If xy, it's possible we need to infer the dimension
-        0 => {},
+        0 => {}
         1 => return Ok(Some(dim_index == 2)),
         2 => return Ok(Some(dim_index == 3)),
         3 => return Ok(Some(true)),
