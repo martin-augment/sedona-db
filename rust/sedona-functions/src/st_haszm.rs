@@ -136,7 +136,7 @@ fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
         _ => return sedona_internal_err!("Unexpected code: {code}"),
     };
 
-    // If GeometryCollection (7), we need to check the dimension of the next geometry
+    // If GeometryCollection (7), we need to check the dimension of the first geometry
     if code & 0x7 == 7 {
         // The next 4 bytes are the number of geometries in the collection
         let num_geometries = match byte_order {
@@ -160,9 +160,9 @@ fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     }
 
     // TODO: Last check: check how many dimensions the 1st coordinate has (all other coordinates must have the same)
-    // e.g handle this case: POINT (0 0 0) -> xyz dimension
+    // e.g handle this case: POINT (0 0 0) -> xyz dimension, POINT (0 0 0 0) -> xyzm dimension
 
-    // If code was unspecified / xy and we couldn't infer the dimension, it must be xy
+    // If code was unspecified and we couldn't infer the dimension, it must be xy
     Ok(Some(false))
 }
 
