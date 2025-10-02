@@ -23,11 +23,9 @@ use datafusion_common::error::Result;
 use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
-use geo_traits::{Dimensions, GeometryTrait};
 use sedona_common::sedona_internal_err;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
 use sedona_schema::{datatypes::SedonaType, matchers::ArgMatcher};
-use wkb::reader::Wkb;
 
 pub fn st_hasz_udf() -> SedonaScalarUDF {
     SedonaScalarUDF::new(
@@ -96,7 +94,7 @@ impl SedonaScalarKernel for STHasZm {
         executor.execute_wkb_void(|maybe_item| {
             match maybe_item {
                 Some(item) => {
-                    builder.append_option(infer_haszm(&item, dim_index)?);
+                    builder.append_option(infer_haszm(item, dim_index)?);
                 }
                 None => builder.append_null(),
             }
