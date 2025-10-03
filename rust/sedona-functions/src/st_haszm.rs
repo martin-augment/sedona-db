@@ -110,6 +110,20 @@ impl SedonaScalarKernel for STHasZm {
 ///
 /// Spec: https://libgeos.org/specifications/wkb/
 fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
+
+    use sedona_geometry::wkb_header::WkbHeader;
+    use geo_traits::Dimensions;
+    let header = WkbHeader::new(buf);
+    let dimension = header.dimension();
+    if matches!(dimension, Dimensions::Xyz | Dimensions::Xyzm) {
+        return Ok(Some(dim_index == 2));
+    }
+    if matches!(dimension, Dimensions::Xym | Dimensions::Xyzm) {
+        return Ok(Some(dim_index == 3));
+    }
+    return Ok(Some(false));
+
+
     if buf.len() < 5 {
         return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
     }
