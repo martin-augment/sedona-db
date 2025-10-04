@@ -20,35 +20,20 @@ use datafusion_common::error::{DataFusionError, Result};
 use geo_traits::Dimensions;
 use sedona_common::sedona_internal_err;
 
+/// Fast-path WKB header parser
+/// Performs operations lazily and caches them after the first computation
 pub struct WkbHeader<'a> {
     buf: &'a [u8],
-    geometry_type_id: GeometryTypeId,
+    geometry_type_id: Option<GeometryTypeId>,
     dimensions: Option<Dimensions>,
 }
 
 impl<'a> WkbHeader<'a> {
     /// Creates a new [WkbHeader] from a buffer
     pub fn new(buf: &'a [u8]) -> Result<Self> {
-        if buf.len() < 5 {
-            return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
-        };
-
-        let byte_order = buf[0];
-
-        // Parse geometry type
-        let code = match byte_order {
-            0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
-            1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
-            other => return sedona_internal_err!("Unexpected byte order: {other}"),
-        };
-
-        let geometry_type_id = GeometryTypeId::try_from_wkb_id(code & 0x7)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
         Ok(Self {
             buf,
-            geometry_type_id,
-            // Compute the following fields lazily since they require a bit more effort (recursion)
+            geometry_type_id: None,
             dimensions: None,
         })
     }
@@ -63,8 +48,13 @@ impl<'a> WkbHeader<'a> {
     /// 7 -> GeometryCollection
     ///
     /// Spec: https://libgeos.org/specifications/wkb/
-    pub fn geometry_type_id(&self) -> GeometryTypeId {
-        self.geometry_type_id
+    pub fn geometry_type_id(mut self) -> Result<GeometryTypeId> {
+        if self.geometry_type_id.is_none() {
+            self.geometry_type_id = Some(parse_geometry_type_id(self.buf)?);
+        }
+        self.geometry_type_id.ok_or_else(|| {
+            DataFusionError::External("Unexpected internal state in WkbHeader".into())
+        })
     }
 
     /// Returns the dimension of the WKB by only parsing what's minimally necessary instead of the entire WKB
@@ -130,4 +120,27 @@ fn parse_dimension(buf: &[u8]) -> Result<Dimensions> {
     }
 
     Ok(Dimensions::Xy)
+}
+
+fn parse_geometry_type_id(buf: &[u8]) -> Result<GeometryTypeId> {
+    if buf.len() < 5 {
+        return sedona_internal_err!("Invalid WKB: buffer too small");
+    };
+
+    let byte_order = buf[0];
+
+    // Parse geometry type
+    let code = match byte_order {
+        0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        other => return sedona_internal_err!("Unexpected byte order: {other}"),
+    };
+
+    // Only low 3 bits is for the base type, high bits include additional info
+    let code = code & 0x7;
+
+    let geometry_type_id = GeometryTypeId::try_from_wkb_id(code)
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    Ok(geometry_type_id)
 }
