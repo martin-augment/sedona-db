@@ -73,16 +73,10 @@ impl<'a> WkbHeader<'a> {
     }
 
     /// Returns the dimension of the WKB by only parsing what's minimally necessary instead of the entire WKB
-    /// 0 -> XY
-    /// 1 -> XYZ
-    /// 2 -> XYM
-    /// 3 -> XYZM
-    ///
-    /// Spec: https://libgeos.org/specifications/wkb/
     pub fn dimension(mut self) -> Result<Dimensions> {
         // Calculate the dimension if we haven't already
         if self.dimensions.is_none() {
-            self.dimensions = Some(parse_dimension(&self.buf)?);
+            self.dimensions = Some(parse_dimension(self.buf)?);
         }
         self.dimensions.ok_or_else(|| {
             DataFusionError::External("Unexpected internal state in WkbHeader".into())

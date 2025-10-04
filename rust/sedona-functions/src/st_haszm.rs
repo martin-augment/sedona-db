@@ -95,7 +95,7 @@ impl SedonaScalarKernel for STHasZm {
         executor.execute_wkb_void(|maybe_item| {
             match maybe_item {
                 Some(item) => {
-                    builder.append_option(infer_haszm(item, dim_index)?);
+                    builder.append_option(invoke_scalar(item, dim_index)?);
                 }
                 None => builder.append_null(),
             }
@@ -110,7 +110,7 @@ impl SedonaScalarKernel for STHasZm {
 /// An error will be thrown for invalid WKB bytes input
 ///
 /// Spec: https://libgeos.org/specifications/wkb/
-fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
+fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     let header = WkbHeader::new(buf)?;
     let dimension = header.dimension()?;
 
@@ -126,7 +126,7 @@ fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
             Dimensions::Xym | Dimensions::Xyzm
         )));
     }
-    return Ok(Some(false));
+    Ok(Some(false))
 }
 
 #[cfg(test)]
