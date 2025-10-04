@@ -144,3 +144,220 @@ fn parse_geometry_type_id(buf: &[u8]) -> Result<GeometryTypeId> {
 
     Ok(geometry_type_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+    use wkt::Wkt;
+
+    fn make_wkb(wkt_value: &'static str) -> Vec<u8> {
+        let geom = Wkt::<f64>::from_str(wkt_value).unwrap();
+        let mut buf: Vec<u8> = vec![];
+        wkb::writer::write_geometry(&mut buf, &geom, Default::default()).unwrap();
+        buf
+    }
+
+    #[test]
+    fn geometry_type_id() {
+        let wkb = make_wkb("POINT (1 2)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Point);
+
+        let wkb = make_wkb("LINESTRING (1 2, 3 4)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::LineString
+        );
+
+        let wkb = make_wkb("POLYGON ((0 0, 0 1, 1 0, 0 0))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Polygon);
+
+        let wkb = make_wkb("MULTIPOINT ((1 2), (3 4))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiPoint
+        );
+
+        let wkb = make_wkb("MULTILINESTRING ((1 2, 3 4))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiLineString
+        );
+
+        let wkb = make_wkb("MULTIPOLYGON (((0 0, 0 1, 1 0, 0 0)))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiPolygon
+        );
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT (1 2))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::GeometryCollection
+        );
+
+        // Some cases with z and m dimensions
+        let wkb = make_wkb("POINT Z (1 2 3)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Point);
+
+        let wkb = make_wkb("LINESTRING Z (1 2 3, 4 5 6)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::LineString
+        );
+
+        let wkb = make_wkb("POLYGON M ((0 0 0, 0 1 0, 1 0 0, 0 0 0))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Polygon);
+    }
+
+    #[test]
+    fn empty_geometry_type_id() {
+        let wkb = make_wkb("POINT EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Point);
+
+        let wkb = make_wkb("LINESTRING EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::LineString
+        );
+
+        let wkb = make_wkb("POLYGON EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Polygon);
+
+        let wkb = make_wkb("MULTIPOINT EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiPoint
+        );
+
+        let wkb = make_wkb("MULTILINESTRING EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiLineString
+        );
+
+        let wkb = make_wkb("MULTIPOLYGON EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::MultiPolygon
+        );
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::GeometryCollection
+        );
+
+        // z, m cases
+        let wkb = make_wkb("POINT Z EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Point);
+
+        let wkb = make_wkb("POINT M EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Point);
+
+        let wkb = make_wkb("LINESTRING ZM EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(
+            header.geometry_type_id().unwrap(),
+            GeometryTypeId::LineString
+        );
+    }
+
+    #[test]
+    fn dimension() {
+        let wkb = make_wkb("POINT (1 2)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+
+        let wkb = make_wkb("POINT Z (1 2 3)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+
+        let wkb = make_wkb("POINT M (1 2 3)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+
+        let wkb = make_wkb("POINT ZM (1 2 3 4)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+    }
+
+    #[test]
+    fn inferred_collections_dimension() {
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z (1 2 3))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT M (1 2 3))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+    }
+
+    #[test]
+    fn empty_geometry_dimension() {
+        // POINTs
+        let wkb = make_wkb("POINT EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+
+        let wkb = make_wkb("POINT Z EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+
+        let wkb = make_wkb("POINT M EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+
+        let wkb = make_wkb("POINT ZM EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+
+        // GEOMETRYCOLLECTIONs
+        let wkb = make_wkb("GEOMETRYCOLLECTION EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION Z EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION M EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION ZM EMPTY");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z EMPTY)");
+        let header = WkbHeader::new(&wkb).unwrap();
+        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+    }
+}
