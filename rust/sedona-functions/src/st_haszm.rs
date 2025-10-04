@@ -23,8 +23,9 @@ use datafusion_common::error::Result;
 use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
-use sedona_common::sedona_internal_err;
+use geo_traits::Dimensions;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
+use sedona_geometry::wkb_header::WkbHeader;
 use sedona_schema::{datatypes::SedonaType, matchers::ArgMatcher};
 
 pub fn st_hasz_udf() -> SedonaScalarUDF {
@@ -110,72 +111,22 @@ impl SedonaScalarKernel for STHasZm {
 ///
 /// Spec: https://libgeos.org/specifications/wkb/
 fn infer_haszm(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
+    let header = WkbHeader::new(buf)?;
+    let dimension = header.dimension()?;
 
-    use sedona_geometry::wkb_header::WkbHeader;
-    use geo_traits::Dimensions;
-    let header = WkbHeader::new(buf);
-    let dimension = header.dimension();
-    if matches!(dimension, Dimensions::Xyz | Dimensions::Xyzm) {
-        return Ok(Some(dim_index == 2));
+    if dim_index == 2 {
+        return Ok(Some(matches!(
+            dimension,
+            Dimensions::Xyz | Dimensions::Xyzm
+        )));
     }
-    if matches!(dimension, Dimensions::Xym | Dimensions::Xyzm) {
-        return Ok(Some(dim_index == 3));
+    if dim_index == 3 {
+        return Ok(Some(matches!(
+            dimension,
+            Dimensions::Xym | Dimensions::Xyzm
+        )));
     }
     return Ok(Some(false));
-
-
-    if buf.len() < 5 {
-        return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
-    }
-
-    let byte_order = buf[0];
-    let code = match byte_order {
-        0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
-        1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
-        other => return sedona_internal_err!("Unexpected byte order: {other}"),
-    };
-
-    // 0000 -> xy or unspecified
-    // 1000 -> xyz
-    // 2000 -> xym
-    // 3000 -> xyzm
-    match code / 1000 {
-        // If xy, it's possible we need to infer the dimension
-        0 => {}
-        1 => return Ok(Some(dim_index == 2)),
-        2 => return Ok(Some(dim_index == 3)),
-        3 => return Ok(Some(true)),
-        _ => return sedona_internal_err!("Unexpected code: {code}"),
-    };
-
-    // If GeometryCollection (7), we need to check the dimension of the first geometry
-    if code & 0x7 == 7 {
-        // The next 4 bytes are the number of geometries in the collection
-        let num_geometries = match byte_order {
-            0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
-            1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
-            other => return sedona_internal_err!("Unexpected byte order: {other}"),
-        };
-        // Check the dimension of the first geometry since they all have to be the same dimension
-        // Note: Attempting to create the following geometries error and are thus not possible to create:
-        // - Nested geometry dimension doesn't match the **specified** geom collection z-dimension
-        //   - GEOMETRYCOLLECTION M (POINT Z (1 1 1))
-        // - Nested geometry doesn't have the specified dimension
-        //   - GEOMETRYCOLLECTION Z (POINT (1 1))
-        // - Nested geometries have different dimensions
-        //   - GEOMETRYCOLLECTION (POINT Z (1 1 1), POINT (1 1))
-        if num_geometries >= 1 {
-            return infer_haszm(&buf[9..], dim_index);
-        }
-        // If empty geometry (num_geometries == 0), fallback to below logic to check the geom collection's dimension
-        // GEOMETRY COLLECTION Z EMPTY hasz -> true
-    }
-
-    // TODO: Last check: check how many dimensions the 1st coordinate has (all other coordinates must have the same)
-    // e.g handle this case: POINT (0 0 0) -> xyz dimension, POINT (0 0 0 0) -> xyzm dimension
-
-    // If code was unspecified and we couldn't infer the dimension, it must be xy
-    Ok(Some(false))
 }
 
 #[cfg(test)]
