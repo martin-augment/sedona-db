@@ -53,11 +53,6 @@ impl<'a> WkbHeader<'a> {
         })
     }
 
-    /// Returns the byte order of the WKB
-    pub fn byte_order(&self) -> u8 {
-        self.buf[0]
-    }
-
     /// Returns the geometry type id of the WKB by only parsing the header instead of the entire WKB
     /// 1 -> Point
     /// 2 -> LineString
