@@ -117,8 +117,8 @@ fn parse_dimension(buf: &[u8]) -> Result<Dimensions> {
     };
 
     // Try to infer dimension
-    // If GeometryCollection (7), we need to check the dimension of the first geometry
-    if code & 0x7 == 7 {
+    // If geometry is a collection (MULTIPOINT, ... GEOMETRYCOLLECTION, code 4-7), we need to check the dimension of the first geometry
+    if code & 0x7 >= 4 {
         // The next 4 bytes are the number of geometries in the collection
         let num_geometries = match byte_order {
             0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),

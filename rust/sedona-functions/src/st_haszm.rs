@@ -135,7 +135,9 @@ mod tests {
     use datafusion_expr::ScalarUDF;
     use rstest::rstest;
     use sedona_schema::datatypes::{WKB_GEOMETRY, WKB_VIEW_GEOMETRY};
-    use sedona_testing::testers::ScalarUdfTester;
+    use sedona_testing::{
+        fixtures::MULTIPOINT_WITH_INFERRED_Z_DIMENSION_WKB, testers::ScalarUdfTester,
+    };
 
     use super::*;
 
@@ -238,5 +240,21 @@ mod tests {
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION M EMPTY"))
             .unwrap();
         m_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
+    }
+
+    #[test]
+    fn multipoint_with_inferred_z_dimension() {
+        let z_tester = ScalarUdfTester::new(st_hasz_udf().into(), vec![WKB_GEOMETRY]);
+        let m_tester = ScalarUdfTester::new(st_hasm_udf().into(), vec![WKB_GEOMETRY]);
+
+        let scalar = ScalarValue::Binary(Some(MULTIPOINT_WITH_INFERRED_Z_DIMENSION_WKB.to_vec()));
+        assert_eq!(
+            z_tester.invoke_scalar(scalar.clone()).unwrap(),
+            ScalarValue::Boolean(Some(true))
+        );
+        assert_eq!(
+            m_tester.invoke_scalar(scalar.clone()).unwrap(),
+            ScalarValue::Boolean(Some(false))
+        );
     }
 }
