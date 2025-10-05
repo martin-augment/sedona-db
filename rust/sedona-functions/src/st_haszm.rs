@@ -108,7 +108,7 @@ impl SedonaScalarKernel for STHasZm {
 
 /// Fast-path inference of geometry type name from raw WKB bytes
 fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
-    let header = WkbHeader::new(buf)?;
+    let header = WkbHeader::try_new(buf)?;
     let dimension = header.dimensions()?;
 
     if dim_index == 2 {
