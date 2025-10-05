@@ -473,8 +473,6 @@ def test_st_geomfromwkb(eng, geom):
         ("POINT Z EMPTY", True),
         ("POINT M EMPTY", False),
         ("POINT ZM EMPTY", True),
-        # SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
-        # ("POINT (0 0 0)", True),
         ("POINT Z (0 0 0)", True),
         ("POINT M (0 0 0)", False),
         ("POINT ZM (0 0 0 0)", True),
