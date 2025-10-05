@@ -58,10 +58,10 @@ impl<'a> WkbHeader<'a> {
     }
 
     /// Returns the dimension of the WKB by only parsing what's minimally necessary instead of the entire WKB
-    pub fn dimension(mut self) -> Result<Dimensions> {
+    pub fn dimensions(mut self) -> Result<Dimensions> {
         // Calculate the dimension if we haven't already
         if self.dimensions.is_none() {
-            self.dimensions = Some(parse_dimension(self.buf)?);
+            self.dimensions = Some(parse_dimensions(self.buf)?);
         }
         self.dimensions.ok_or_else(|| {
             DataFusionError::External("Unexpected internal state in WkbHeader".into())
@@ -69,7 +69,7 @@ impl<'a> WkbHeader<'a> {
     }
 }
 
-fn parse_dimension(buf: &[u8]) -> Result<Dimensions> {
+fn parse_dimensions(buf: &[u8]) -> Result<Dimensions> {
     if buf.len() < 5 {
         return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
     }
@@ -113,7 +113,7 @@ fn parse_dimension(buf: &[u8]) -> Result<Dimensions> {
         // - Nested geometries have different dimensions
         //   - GEOMETRYCOLLECTION (POINT Z (1 1 1), POINT (1 1))
         if num_geometries >= 1 {
-            return parse_dimension(&buf[9..]);
+            return parse_dimensions(&buf[9..]);
         }
         // If empty geometry (num_geometries == 0), fallback to below logic to check the geom collection's dimension
         // GEOMETRY COLLECTION Z EMPTY hasz -> true
@@ -283,81 +283,81 @@ mod tests {
     }
 
     #[test]
-    fn dimension() {
+    fn dimensions() {
         let wkb = make_wkb("POINT (1 2)");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xy);
 
         let wkb = make_wkb("POINT Z (1 2 3)");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
 
         let wkb = make_wkb("POINT M (1 2 3)");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xym);
 
         let wkb = make_wkb("POINT ZM (1 2 3 4)");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
     }
 
     #[test]
-    fn inferred_collections_dimension() {
+    fn inferred_collections_dimensions() {
         let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z (1 2 3))");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION (POINT M (1 2 3))");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xym);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
     }
 
     #[test]
-    fn empty_geometry_dimension() {
+    fn empty_geometry_dimensions() {
         // POINTs
         let wkb = make_wkb("POINT EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xy);
 
         let wkb = make_wkb("POINT Z EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
 
         let wkb = make_wkb("POINT M EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xym);
 
         let wkb = make_wkb("POINT ZM EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
 
         // GEOMETRYCOLLECTIONs
         let wkb = make_wkb("GEOMETRYCOLLECTION EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xy);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xy);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION Z EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION M EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xym);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xym);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION ZM EMPTY");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyzm);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
 
         let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z EMPTY)");
         let header = WkbHeader::new(&wkb).unwrap();
-        assert_eq!(header.dimension().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
     }
 }
