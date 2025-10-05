@@ -107,9 +107,6 @@ impl SedonaScalarKernel for STHasZm {
 }
 
 /// Fast-path inference of geometry type name from raw WKB bytes
-/// An error will be thrown for invalid WKB bytes input
-///
-/// Spec: https://libgeos.org/specifications/wkb/
 fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     let header = WkbHeader::new(buf)?;
     let dimension = header.dimension()?;
@@ -172,16 +169,6 @@ mod tests {
         let result = m_tester.invoke_scalar("POINT (1 2)").unwrap();
         m_tester.assert_scalar_result_equals(result, false);
 
-        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
-        // Infer z-dimension
-        // let result = z_tester.invoke_scalar("POINT (1 2 3)").unwrap();
-        // z_tester.assert_scalar_result_equals(result, true);
-
-        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
-        // Infer z-dimension
-        // let result = m_tester.invoke_scalar("POINT (1 2 3)").unwrap();
-        // m_tester.assert_scalar_result_equals(result, false);
-
         let result = z_tester.invoke_scalar("POINT M (1 2 3)").unwrap();
         z_tester.assert_scalar_result_equals(result, false);
 
@@ -206,14 +193,6 @@ mod tests {
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION Z (POINT Z (1 2 3))"))
             .unwrap();
         z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
-
-        // SedonaDB can't parse this yet: https://github.com/apache/sedona-db/issues/162
-        // Z-dimension specified only on the geom collection level but not the nested geometry level
-        // Geometry collection with Z dimension both on the geom collection and nested geometry level
-        // let result = z_tester
-        //     .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION Z (POINT (1 2 3))"))
-        //     .unwrap();
-        // z_tester.assert_scalar_result_equals(result, ScalarValue::Boolean(Some(true)));
 
         let result = m_tester
             .invoke_wkb_scalar(Some("GEOMETRYCOLLECTION (POINT M (1 2 3))"))
