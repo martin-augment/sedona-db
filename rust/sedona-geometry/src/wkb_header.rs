@@ -690,9 +690,5 @@ mod tests {
         let wkb = make_wkb("GEOMETRYCOLLECTION ZM EMPTY");
         let header = WkbHeader::try_new(&wkb).unwrap();
         assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
-
-        // let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z EMPTY)");
-        // let header = WkbHeader::try_new(&wkb).unwrap();
-        // assert_eq!(header.dimensions().unwrap(), Dimensions::Xyz);
     }
 }
