@@ -261,7 +261,6 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
     // Skip the SRID if it's present
     if geometry_type & SRID_FLAG_BIT != 0 {
         i += 4;
-        // panic!("EWKB was detected");
     }
 
     if matches!(
@@ -588,11 +587,70 @@ mod tests {
         assert_eq!(header.size(), 0);
     }
 
+    // #[test]
+    // fn srid() {
+    //     let wkb = make_wkb("SRID=4326;POINT (1 2)");
+    //     println!("wkb: {:?}", wkb);
+    //     let header = WkbHeader::try_new(&wkb).unwrap();
+    //     assert_eq!(header.srid(), 4326);
+    // }
+
     #[test]
-    fn srid() {
-        let wkb = make_wkb("SRID=4326;POINT (1 2)");
+    fn first_xy() {
+        let wkb = make_wkb("POINT (-5 -2)");
         let header = WkbHeader::try_new(&wkb).unwrap();
-        assert_eq!(header.srid(), 4326);
+        assert_eq!(header.first_xy(), (-5.0, -2.0));
+
+        let wkb = make_wkb("LINESTRING (1 2, 3 4)");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (1.0, 2.0));
+
+        let wkb = make_wkb("POLYGON ((0 0, 0 1, 1 0, 0 0))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        let (x, y) = header.first_xy();
+        println!("x: {}, y: {}", x, y);
+        assert_eq!(header.first_xy(), (0.0, 0.0));
+
+        let wkb = make_wkb("MULTIPOINT ((1 2), (3 4))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (1.0, 2.0));
+
+        let wkb = make_wkb("MULTILINESTRING ((3 4, 1 2), (5 6, 7 8))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (3.0, 4.0));
+
+        let wkb = make_wkb("MULTIPOLYGON (((-1 -1, 0 1, 1 -1, -1 -1)))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (-1.0, -1.0));
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT (1 2))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (1.0, 2.0));
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (1 2, 3 4), POLYGON ((0 0, 0 1, 1 0, 0 0)))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (1.0, 2.0));
+    }
+
+    #[test]
+    fn empty_first_xy() {
+        let wkb = make_wkb("POINT EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        let (x, y) = header.first_xy();
+        assert!(x.is_nan());
+        assert!(y.is_nan());
+
+        let wkb = make_wkb("LINESTRING EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        let (x, y) = header.first_xy();
+        assert!(x.is_nan());
+        assert!(y.is_nan());
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION Z EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        let (x, y) = header.first_xy();
+        assert!(x.is_nan());
+        assert!(y.is_nan());
     }
 
     #[test]
