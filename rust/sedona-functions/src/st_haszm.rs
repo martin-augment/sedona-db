@@ -114,8 +114,8 @@ fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     // Infer dimension based on first coordinate dimension for cases where it differs from top-level
     // e.g GEOMETRYCOLLECTION (POINT Z (1 2 3))
     let dimensions;
-    if let Some(first_coord_dimensions) = header.first_coord_dimensions() {
-        dimensions = first_coord_dimensions;
+    if let Some(first_geom_dimensions) = header.first_geom_dimensions() {
+        dimensions = first_geom_dimensions;
     } else {
         dimensions = top_level_dimensions;
     }

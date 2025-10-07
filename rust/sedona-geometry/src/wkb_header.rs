@@ -47,7 +47,7 @@ impl WkbHeader {
     /// Creates a new [WkbHeader] from a buffer
     pub fn try_new(buf: &[u8]) -> Result<Self> {
         if buf.len() < 5 {
-            return sedona_internal_err!("Invalid WKB: buffer too small -> try_new");
+            return exec_err!("Invalid WKB: buffer too small -> try_new");
         };
 
         let byte_order = buf[0];
@@ -155,7 +155,7 @@ impl WkbHeader {
             1 => Dimensions::Xyz,
             2 => Dimensions::Xym,
             3 => Dimensions::Xyzm,
-            _ => sedona_internal_err!("Unexpected code: {}", self.geometry_type)?,
+            _ => exec_err!("Unexpected code: {}", self.geometry_type)?,
         };
         Ok(dimensions)
     }
@@ -309,7 +309,7 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
 // Given a buffer starting at the coordinate itself, parse the x and y coordinates
 fn parse_coord(buf: &[u8], byte_order: u8) -> Result<f64> {
     if buf.len() < 8 {
-        return sedona_internal_err!("Invalid WKB: buffer too small -> parse_coord");
+        return exec_err!("Invalid WKB: buffer too small -> parse_coord");
     }
 
     let coord: f64 = match byte_order {
@@ -328,7 +328,7 @@ fn parse_coord(buf: &[u8], byte_order: u8) -> Result<f64> {
 // Parses the top-level dimension of the geometry
 fn parse_dimensions(buf: &[u8]) -> Result<Dimensions> {
     if buf.len() < 9 {
-        return sedona_internal_err!("Invalid WKB: buffer too small -> parse_dimensions");
+        return exec_err!("Invalid WKB: buffer too small -> parse_dimensions");
     }
 
     let byte_order = buf[0];
@@ -344,7 +344,7 @@ fn parse_dimensions(buf: &[u8]) -> Result<Dimensions> {
         1 => Ok(Dimensions::Xyz),
         2 => Ok(Dimensions::Xym),
         3 => Ok(Dimensions::Xyzm),
-        _ => sedona_internal_err!("Unexpected code: {code:?}"),
+        _ => exec_err!("Unexpected code: {code:?}"),
     }
 }
 
