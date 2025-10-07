@@ -134,7 +134,7 @@ impl WkbHeader {
     /// 7 -> GeometryCollection
     ///
     /// Spec: https://libgeos.org/specifications/wkb/
-    pub fn geometry_type_id(self) -> Result<GeometryTypeId> {
+    pub fn geometry_type_id(&self) -> Result<GeometryTypeId> {
         // Only low 3 bits is for the base type, high bits include additional info
         let code = self.geometry_type & 0x7;
 
@@ -149,17 +149,17 @@ impl WkbHeader {
     /// Number of points for a linestring
     /// Number of rings for a polygon
     /// Number of geometries for a MULTIPOINT, MULTILINESTRING, MULTIPOLYGON, or GEOMETRYCOLLECTION
-    pub fn size(self) -> u32 {
+    pub fn size(&self) -> u32 {
         self.size
     }
 
     /// Returns the SRID if given buffer was EWKB. Otherwise, 0.
-    pub fn srid(self) -> u32 {
+    pub fn srid(&self) -> u32 {
         self.srid
     }
 
     /// Returns the first x, y coordinates for a point. Otherwise (f64::NAN, f64::NAN) if empty
-    pub fn first_xy(self) -> (f64, f64) {
+    pub fn first_xy(&self) -> (f64, f64) {
         self.first_xy
     }
 
@@ -524,6 +524,75 @@ mod tests {
         let wkb = make_wkb("POLYGON M ((0 0 0, 0 1 0, 1 0 0, 0 0 0))");
         let header = WkbHeader::try_new(&wkb).unwrap();
         assert_eq!(header.geometry_type_id().unwrap(), GeometryTypeId::Polygon);
+    }
+
+    #[test]
+    fn size() {
+        let wkb = make_wkb("LINESTRING (1 2, 3 4)");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 2);
+
+        let wkb = make_wkb("POLYGON ((0 0, 0 1, 1 0, 0 0), (1 1, 1 2, 2 1, 1 1))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 2);
+
+        let wkb = make_wkb("MULTIPOINT ((1 2), (3 4))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 2);
+
+        let wkb = make_wkb("MULTILINESTRING ((1 2, 3 4, 5 6), (7 8, 9 10, 11 12))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 2);
+
+        let wkb = make_wkb("MULTIPOLYGON (((0 0, 0 1, 1 0, 0 0)), ((1 1, 1 2, 2 1, 1 1)))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 2);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT (1 2))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 1);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (1 2, 3 4), POLYGON ((0 0, 0 1, 1 0, 0 0)))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 3);
+    }
+
+    #[test]
+    fn empty_size() {
+        let wkb = make_wkb("LINESTRING EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("POLYGON EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("MULTIPOINT EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("MULTILINESTRING EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("MULTIPOLYGON EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION Z EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.size(), 0);
+    }
+
+    #[test]
+    fn srid() {
+        let wkb = make_wkb("SRID=4326;POINT (1 2)");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.srid(), 4326);
     }
 
     #[test]
