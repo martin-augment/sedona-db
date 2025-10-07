@@ -24,6 +24,7 @@ use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
 use geo_traits::Dimensions;
+use sedona_common::sedona_internal_err;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
 use sedona_geometry::wkb_header::WkbHeader;
 use sedona_schema::{datatypes::SedonaType, matchers::ArgMatcher};
@@ -109,17 +110,26 @@ impl SedonaScalarKernel for STHasZm {
 /// Fast-path inference of geometry type name from raw WKB bytes
 fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
     let header = WkbHeader::try_new(buf)?;
-    let dimension = header.dimensions()?;
+    let top_level_dimensions = header.dimensions()?;
+
+    // Infer dimension based on first coordinate dimension for cases where it differs from top-level
+    // e.g GEOMETRYCOLLECTION (POINT Z (1 2 3))
+    let dimensions;
+    if let Some(first_coord_dimensions) = header.first_coord_dimensions() {
+        dimensions = first_coord_dimensions;
+    } else {
+        dimensions = top_level_dimensions;
+    }
 
     if dim_index == 2 {
         return Ok(Some(matches!(
-            dimension,
+            dimensions,
             Dimensions::Xyz | Dimensions::Xyzm
         )));
     }
     if dim_index == 3 {
         return Ok(Some(matches!(
-            dimension,
+            dimensions,
             Dimensions::Xym | Dimensions::Xyzm
         )));
     }

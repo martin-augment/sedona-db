@@ -168,7 +168,7 @@ impl WkbHeader {
     }
 
     /// Returns the top-level dimension of the WKB
-    pub fn dimensions(self) -> Result<Dimensions> {
+    pub fn dimensions(&self) -> Result<Dimensions> {
         let dimensions = match self.geometry_type / 1000 {
             0 => Dimensions::Xy,
             1 => Dimensions::Xyz,
@@ -177,27 +177,6 @@ impl WkbHeader {
             _ => sedona_internal_err!("Unexpected code: {}", self.geometry_type)?,
         };
         Ok(dimensions)
-
-        // TODO: move this to st_haszm
-        // // 0000 -> xy
-        // // 1000 -> xyz
-        // // 2000 -> xym
-        // // 3000 -> xyzm
-        // let top_level_dimension = match self.geometry_type / 1000 {
-        //     0 => Dimensions::Xy,
-        //     1 => Dimensions::Xyz,
-        //     2 => Dimensions::Xym,
-        //     3 => Dimensions::Xyzm,
-        //     _ => sedona_internal_err!("Unexpected code: {}", self.geometry_type)?,
-        // };
-
-        // // Infer dimension based on first coordinate dimension for cases where it differs from top-level
-        // // e.g GEOMETRYCOLLECTION (POINT Z (1 2 3))
-        // if let Some(first_coord_dimensions) = self.first_coord_dimensions {
-        //     return Ok(first_coord_dimensions);
-        // }
-
-        // Ok(top_level_dimension)
     }
 
     pub fn first_coord_dimensions(&self) -> Option<Dimensions> {
