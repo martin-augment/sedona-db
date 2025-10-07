@@ -286,6 +286,30 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
         }
         // + 4 for size
         i += 4;
+
+        // For POLYGON, after the number of rings, the next 4 bytes are the
+        // number of points in the exterior ring. We must skip that count to
+        // land on the first coordinate's x value.
+        if geometry_type_id == GeometryTypeId::Polygon {
+            if buf.len() < i + 4 {
+                return exec_err!(
+                    "Invalid WKB: buffer too small -> polygon first ring size {} is not < {}",
+                    buf.len(),
+                    i + 4
+                );
+            }
+            let ring0_num_points = match byte_order {
+                0 => u32::from_be_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
+                1 => u32::from_le_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
+                other => return sedona_internal_err!("Unexpected byte order: {other}"),
+            };
+
+            // (NaN, NaN) for empty first ring
+            if ring0_num_points == 0 {
+                return Ok((f64::NAN, f64::NAN));
+            }
+            i += 4;
+        }
     }
 
     if buf.len() < i + 8 {
@@ -608,8 +632,12 @@ mod tests {
         let wkb = make_wkb("POLYGON ((0 0, 0 1, 1 0, 0 0))");
         let header = WkbHeader::try_new(&wkb).unwrap();
         let (x, y) = header.first_xy();
-        println!("x: {}, y: {}", x, y);
         assert_eq!(header.first_xy(), (0.0, 0.0));
+
+        // Another polygon test since that logic is more complicated
+        let wkb = make_wkb("POLYGON ((1.5 0.5, 1.5 1.5, 1.5 0.5), (0 0, 0 1, 1 0, 0 0))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_xy(), (1.5, 0.5));
 
         let wkb = make_wkb("MULTIPOINT ((1 2), (3 4))");
         let header = WkbHeader::try_new(&wkb).unwrap();
@@ -619,7 +647,7 @@ mod tests {
         let header = WkbHeader::try_new(&wkb).unwrap();
         assert_eq!(header.first_xy(), (3.0, 4.0));
 
-        let wkb = make_wkb("MULTIPOLYGON (((-1 -1, 0 1, 1 -1, -1 -1)))");
+        let wkb = make_wkb("MULTIPOLYGON (((-1 -1, 0 1, 1 -1, -1 -1)), ((0 0, 0 1, 1 0, 0 0)))");
         let header = WkbHeader::try_new(&wkb).unwrap();
         assert_eq!(header.first_xy(), (-1.0, -1.0));
 
