@@ -27,7 +27,6 @@ const SRID_FLAG_BIT: u32 = 0x20000000;
 
 /// Fast-path WKB header parser
 /// Performs operations lazily and caches them after the first computation
-// pub struct WkbHeader<'a> {
 pub struct WkbHeader {
     geometry_type: u32,
     // Not applicable for a point
@@ -39,18 +38,12 @@ pub struct WkbHeader {
     srid: u32,
     // First x,y coordinates for a point. Otherwise (f64::NAN, f64::NAN) if empty
     first_xy: (f64, f64),
-    // Dimensions of the geometry: xy, xyz, xym, or xyzm
-    // dimensions: Dimensions,
+    // Dimensions of the coordinate: xy, xyz, xym, or xyzm
     first_coord_dimensions: Option<Dimensions>,
-    // buf: &'a [u8],
-    // geometry_type_id: Option<GeometryTypeId>,
-    // dimensions: Dimensions,
 }
 
-// impl<'a> WkbHeader<'a> {
 impl WkbHeader {
     /// Creates a new [WkbHeader] from a buffer
-    // pub fn try_new(buf: &'a [u8]) -> Result<Self> {
     pub fn try_new(buf: &[u8]) -> Result<Self> {
         if buf.len() < 5 {
             return sedona_internal_err!("Invalid WKB: buffer too small -> try_new");
@@ -68,8 +61,6 @@ impl WkbHeader {
         let geometry_type_id = GeometryTypeId::try_from_wkb_id(geometry_type & 0x7)
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-        println!("top geometry_type_id: {:?}", geometry_type_id);
-
         let mut i = 5;
         let mut srid = 0;
         // if EWKB
@@ -82,38 +73,31 @@ impl WkbHeader {
             i = 9;
         }
 
-        let size;
-        if geometry_type_id == GeometryTypeId::Point {
+        let size = if geometry_type_id == GeometryTypeId::Point {
             // Dummy value for a point
-            size = 1;
+            1
         } else {
-            size = match byte_order {
-                0 => u32::from_be_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
-                1 => u32::from_le_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
+            match byte_order {
+                0 => u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
+                1 => u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
                 other => return sedona_internal_err!("Unexpected byte order: {other}"),
-            };
-        }
+            }
+        };
 
         // Default values for empty geometries
         let first_x;
         let first_y;
-        // TODO: rename to first_geom_dimensions
         let first_coord_dimensions: Option<Dimensions>;
-        println!("top level buf len: {}", buf.len());
 
         let first_geom_idx = first_geom_idx(buf)?;
         if let Some(i) = first_geom_idx {
-            println!("first_geom_idx: {}", i);
             first_coord_dimensions = Some(parse_dimensions(&buf[i..])?);
-            println!("first_coord_dimensions: {:?}", first_coord_dimensions);
             (first_x, first_y) = first_xy(&buf[i..])?;
-            println!("first_x: {}, first_y: {}", first_x, first_y);
         } else {
             first_coord_dimensions = None;
             first_x = f64::NAN;
             first_y = f64::NAN;
         }
-        println!("");
 
         Ok(Self {
             geometry_type,
@@ -199,15 +183,13 @@ fn first_geom_idx(buf: &[u8]) -> Result<Option<usize>> {
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
     match geometry_type_id {
-        GeometryTypeId::Point | GeometryTypeId::LineString | GeometryTypeId::Polygon => {
-            return Ok(Some(0))
-        }
+        GeometryTypeId::Point | GeometryTypeId::LineString | GeometryTypeId::Polygon => Ok(Some(0)),
         GeometryTypeId::MultiPoint
         | GeometryTypeId::MultiLineString
         | GeometryTypeId::MultiPolygon
         | GeometryTypeId::GeometryCollection => {
             if buf.len() < 9 {
-                return exec_err!("Invalid WKB: buffer too small");
+                exec_err!("Invalid WKB: buffer too small")?
             }
             let num_geometries = match byte_order {
                 0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
@@ -228,12 +210,12 @@ fn first_geom_idx(buf: &[u8]) -> Result<Option<usize>> {
             // Add to current offset of i
             let off = first_geom_idx(&buf[i..]);
             if let Ok(Some(off)) = off {
-                return Ok(Some(i + off));
+                Ok(Some(i + off))
             } else {
-                return Ok(None);
+                Ok(None)
             }
         }
-        _ => return sedona_internal_err!("Unexpected geometry type: {geometry_type_id:?}"),
+        _ => sedona_internal_err!("Unexpected geometry type: {geometry_type_id:?}"),
     }
 }
 
@@ -253,7 +235,6 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
 
     let geometry_type_id = GeometryTypeId::try_from_wkb_id(geometry_type & 0x7)
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
-    println!("first_xy: geometry_type_id: {:?}", geometry_type_id);
 
     // 1 (byte_order) + 4 (geometry_type) = 5
     let mut i = 5;
@@ -275,8 +256,8 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
             );
         }
         let size = match byte_order {
-            0 => u32::from_be_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
-            1 => u32::from_le_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
+            0 => u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
+            1 => u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
             other => return sedona_internal_err!("Unexpected byte order: {other}"),
         };
 
@@ -299,8 +280,8 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
                 );
             }
             let ring0_num_points = match byte_order {
-                0 => u32::from_be_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
-                1 => u32::from_le_bytes([buf[i + 0], buf[i + 1], buf[i + 2], buf[i + 3]]),
+                0 => u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
+                1 => u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]),
                 other => return sedona_internal_err!("Unexpected byte order: {other}"),
             };
 
@@ -319,70 +300,9 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
             buf.len()
         );
     }
-    let x = parse_coord(&buf[i + 0..], byte_order)?;
+    let x = parse_coord(&buf[i..], byte_order)?;
     let y = parse_coord(&buf[i + 8..], byte_order)?;
-    return Ok((x, y));
-
-    // 9 + 8 (x) + 8 (y)
-    // if buf.len() < 9 + 8 + 8 {
-    //     return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
-    // }
-
-    // let x = parse_coord(&buf[9..], byte_order)?;
-    // let y = parse_coord(&buf[17..], byte_order)?;
-    // return Ok((x, y));
-
-    // 1 (byte_order) + 4 (geometry_type) + 4 (size) = 9
-    // let i = 9;
-    // let srid_offset = 0;
-
-    // if matches!(
-    //     geometry_type_id,
-    //     GeometryTypeId::LineString | GeometryTypeId::Polygon
-    // ) {
-    //     // i is index of the first coordinate
-    //     return Ok(parse_xy(&buf[i..], byte_order)?);
-    // } else if matches!(
-    //     geometry_type_id,
-    //     GeometryTypeId::MultiPoint
-    //         | GeometryTypeId::MultiLineString
-    //         | GeometryTypeId::MultiPolygon
-    //         | GeometryTypeId::GeometryCollection
-    // ) {
-    //     // i is the index of the first nested geometry
-    //     let first_nested_geom_buf = &buf[i..];
-    //     // Recursive call to get the first xy coord of the first nested geometry
-    //     return Ok(first_xy(&first_nested_geom_buf, geometry_type_id)?);
-    // } else {
-    //     return sedona_internal_err!("Unexpected geometry type: {geometry_type_id:?}");
-    // }
-
-    // match geometry_type_id {
-    //     // 1 (byte_order) + 4 (geometry_type) = 5 (no size)
-    //     GeometryTypeId::Point => return Ok(parse_xy(&buf[5..], byte_order)?),
-    //     // 1 (byte_order) + 4 (geometry_type) + 4 (size) = 9
-    //     GeometryTypeId::LineString | GeometryTypeId::Polygon => return Ok(parse_xy(&buf[9..], byte_order)?),
-    //     // 1 (byte_order) + 4 (geometry_type) + 4 (size) = 9
-    //     GeometryTypeId::MultiPoint
-    //     | GeometryTypeId::MultiLineString
-    //     | GeometryTypeId::MultiPolygon
-    //     | GeometryTypeId::GeometryCollection => {
-    //         let size = match byte_order {
-    //             0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
-    //             1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
-    //             other => return sedona_internal_err!("Unexpected byte order: {other}"),
-    //         };
-    //         // (NaN, NaN) for empty geometries
-    //         if size == 0 {
-    //             return Ok((f64::NAN, f64::NAN));
-    //         } else {
-    //             let first_nested_geom_buf = &buf[9..];
-    //             // Recursive call to get the first xy coord of the first nested geometry
-    //             return Ok(first_xy(&first_nested_geom_buf, geometry_type_id)?);
-    //         }
-    //     },
-    //     _ => return sedona_internal_err!("Unexpected geometry type: {geometry_type_id:?}"),
-    // }
+    Ok((x, y))
 }
 
 // Given a buffer starting at the coordinate itself, parse the x and y coordinates
@@ -425,53 +345,6 @@ fn parse_dimensions(buf: &[u8]) -> Result<Dimensions> {
         3 => Ok(Dimensions::Xyzm),
         _ => sedona_internal_err!("Unexpected code: {code:?}"),
     }
-
-    // if buf.len() < 5 {
-    //     return sedona_internal_err!("Invalid WKB: buffer too small ({} bytes)", buf.len());
-    // }
-
-    // let byte_order = buf[0];
-
-    // let code = match byte_order {
-    //     0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
-    //     1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
-    //     other => return sedona_internal_err!("Unexpected byte order: {other}"),
-    // };
-
-    // let geometry_type_id = GeometryTypeId::try_from_wkb_id(code)
-    //     .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-    // match geometry_type_id {
-    //     GeometryTypeId::Point | GeometryTypeId::LineString | GeometryTypeId::Polygon => {
-    //         // 0000 -> xy or unspecified
-    //         // 1000 -> xyz
-    //         // 2000 -> xym
-    //         // 3000 -> xyzm
-    //         match code / 1000 {
-    //             // If xy, it's possible we need to infer the dimension
-    //             0 => return Ok(None),
-    //             1 => return Ok(Some(Dimensions::Xyz)),
-    //             2 => return Ok(Some(Dimensions::Xym)),
-    //             3 => return Ok(Some(Dimensions::Xyzm)),
-    //             _ => return sedona_internal_err!("Unexpected code: {code}"),
-    //         };
-    //     }
-    //     GeometryTypeId::MultiPoint | GeometryTypeId::MultiLineString | GeometryTypeId::MultiPolygon | GeometryTypeId::GeometryCollection => {
-    //         // If nested geometry, then recursive call
-    //         let num_geometries = match byte_order {
-    //             0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
-    //             1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
-    //             other => return sedona_internal_err!("Unexpected byte order: {other}"),
-    //         };
-
-    //         if num_geometries == 0 {
-    //             return Ok(None);
-    //         }
-    //         // Recursive call to get the dimension of the first nested geometry
-    //         return parse_dimensions(&buf[9..]);
-    //     }
-    //     _ => return sedona_internal_err!("Unexpected geometry type: {geometry_type_id:?}"),
-    // }
 }
 
 #[cfg(test)]
@@ -613,6 +486,7 @@ mod tests {
 
     // #[test]
     // fn srid() {
+    //     // This doesn't work
     //     let wkb = make_wkb("SRID=4326;POINT (1 2)");
     //     println!("wkb: {:?}", wkb);
     //     let header = WkbHeader::try_new(&wkb).unwrap();
