@@ -70,20 +70,16 @@ impl WkbHeader {
 
         println!("top geometry_type_id: {:?}", geometry_type_id);
 
-        let i;
-        let srid;
+        let mut i = 5;
+        let mut srid = 0;
         // if EWKB
         if geometry_type & SRID_FLAG_BIT != 0 {
-            panic!("EWKB was detected");
-            // srid = match byte_order {
-            //     0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
-            //     1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
-            //     other => return sedona_internal_err!("Unexpected byte order: {other}"),
-            // };
-            // i = 9;
-        } else {
-            srid = 0;
-            i = 5;
+            srid = match byte_order {
+                0 => u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]),
+                1 => u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
+                other => return sedona_internal_err!("Unexpected byte order: {other}"),
+            };
+            i = 9;
         }
 
         let size;
@@ -120,8 +116,6 @@ impl WkbHeader {
         println!("");
 
         Ok(Self {
-            // buf,
-            // geometry_type_id: None,
             geometry_type,
             srid,
             size,
@@ -150,19 +144,21 @@ impl WkbHeader {
         Ok(geometry_type_id)
     }
 
-    // Not applicable for a point
-    // Number of points for a linestring
-    // Number of rings for a polygon
-    // Number of geometries for a MULTIPOINT, MULTILINESTRING, MULTIPOLYGON, or GEOMETRYCOLLECTION
+    /// Returns the size of the geometry
+    /// Not applicable for a point
+    /// Number of points for a linestring
+    /// Number of rings for a polygon
+    /// Number of geometries for a MULTIPOINT, MULTILINESTRING, MULTIPOLYGON, or GEOMETRYCOLLECTION
     pub fn size(self) -> u32 {
         self.size
     }
 
-    // SRID if given buffer was EWKB. Otherwise, 0.
+    /// Returns the SRID if given buffer was EWKB. Otherwise, 0.
     pub fn srid(self) -> u32 {
         self.srid
     }
 
+    /// Returns the first x, y coordinates for a point. Otherwise (f64::NAN, f64::NAN) if empty
     pub fn first_xy(self) -> (f64, f64) {
         self.first_xy
     }
@@ -179,6 +175,7 @@ impl WkbHeader {
         Ok(dimensions)
     }
 
+    /// Returns the dimensions of the first coordinate of the geometry
     pub fn first_coord_dimensions(&self) -> Option<Dimensions> {
         self.first_coord_dimensions
     }
@@ -200,8 +197,6 @@ fn first_geom_idx(buf: &[u8]) -> Result<Option<usize>> {
     };
     let geometry_type_id = GeometryTypeId::try_from_wkb_id(geometry_type & 0x7)
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-    println!("first_geom_idx: geometry_type_id: {:?}", geometry_type_id);
 
     match geometry_type_id {
         GeometryTypeId::Point | GeometryTypeId::LineString | GeometryTypeId::Polygon => {
@@ -227,7 +222,6 @@ fn first_geom_idx(buf: &[u8]) -> Result<Option<usize>> {
             let mut i = 9;
             if geometry_type & SRID_FLAG_BIT != 0 {
                 i += 4;
-                panic!("EWKB was detected");
             }
 
             // Recursive call to get the first geom of the first nested geometry
@@ -267,7 +261,7 @@ fn first_xy(buf: &[u8]) -> Result<(f64, f64)> {
     // Skip the SRID if it's present
     if geometry_type & SRID_FLAG_BIT != 0 {
         i += 4;
-        panic!("EWKB was detected");
+        // panic!("EWKB was detected");
     }
 
     if matches!(
@@ -614,27 +608,6 @@ mod tests {
     }
 
     #[test]
-    fn first_coord_dimensions() {
-        // Top-level dimension is xy, while nested geometry is xyz
-        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z (1 2 3))");
-        let header = WkbHeader::try_new(&wkb).unwrap();
-        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyz);
-        assert_eq!(header.dimensions().unwrap(), Dimensions::Xy);
-
-        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
-        let header = WkbHeader::try_new(&wkb).unwrap();
-        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyzm);
-
-        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT M (1 2 3))");
-        let header = WkbHeader::try_new(&wkb).unwrap();
-        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xym);
-
-        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
-        let header = WkbHeader::try_new(&wkb).unwrap();
-        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyzm);
-    }
-
-    #[test]
     fn empty_geometry_dimensions() {
         // POINTs
         let wkb = make_wkb("POINT EMPTY");
@@ -669,5 +642,50 @@ mod tests {
         let wkb = make_wkb("GEOMETRYCOLLECTION ZM EMPTY");
         let header = WkbHeader::try_new(&wkb).unwrap();
         assert_eq!(header.dimensions().unwrap(), Dimensions::Xyzm);
+    }
+
+    #[test]
+    fn first_coord_dimensions() {
+        // Top-level dimension is xy, while nested geometry is xyz
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT Z (1 2 3))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyz);
+        assert_eq!(header.dimensions().unwrap(), Dimensions::Xy);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyzm);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT M (1 2 3))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xym);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION (POINT ZM (1 2 3 4))");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions().unwrap(), Dimensions::Xyzm);
+    }
+
+    #[test]
+    fn empty_geometry_first_coord_dimensions() {
+        // Should return None for all of these since there are no coordinates
+        let wkb = make_wkb("POINT EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions(), None);
+
+        let wkb = make_wkb("LINESTRING EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions(), None);
+
+        let wkb = make_wkb("POLYGON EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions(), None);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions(), None);
+
+        let wkb = make_wkb("GEOMETRYCOLLECTION Z EMPTY");
+        let header = WkbHeader::try_new(&wkb).unwrap();
+        assert_eq!(header.first_coord_dimensions(), None);
     }
 }
