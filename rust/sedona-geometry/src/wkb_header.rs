@@ -195,8 +195,8 @@ impl WkbHeader {
 
                 // Recursive call to get the first geom of the first nested geometry
                 // Add to current offset of i
-                let off = Self::first_geom_idx(&buf[i..]);
-                if let Ok(Some(off)) = off {
+                let off = Self::first_geom_idx(&buf[i..])?;
+                if let Some(off) = off {
                     Ok(Some(i + off))
                 } else {
                     Ok(None)
