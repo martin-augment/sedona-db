@@ -410,12 +410,13 @@ fn parse_dimensions(buf: &[u8]) -> Result<Dimensions, SedonaGeometryError> {
 mod tests {
     use super::*;
     use std::str::FromStr;
+    use wkb::writer::{write_geometry, WriteOptions};
     use wkt::Wkt;
 
     fn make_wkb(wkt_value: &'static str) -> Vec<u8> {
         let geom = Wkt::<f64>::from_str(wkt_value).unwrap();
         let mut buf: Vec<u8> = vec![];
-        wkb::writer::write_geometry(&mut buf, &geom, Default::default()).unwrap();
+        write_geometry(&mut buf, &geom, &WriteOptions::default()).unwrap();
         buf
     }
 
