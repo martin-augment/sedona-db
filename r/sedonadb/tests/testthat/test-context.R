@@ -39,3 +39,32 @@ test_that("views can be created and dropped", {
   expect_error(sd_sql("SELECT * FROM foofy"), "table '(.*?)' not found")
   expect_error(sd_view("foofy"), "No table named 'foofy'")
 })
+
+test_that("scalar udfs can be registered", {
+  udf <- ctx()$scalar_udf_xptr("st_point")
+  expect_s3_class(udf, "datafusion_scalar_udf")
+
+  sd_register_udf(udf)
+  df <- sd_sql("SELECT ST_Point(0, 1) as geom") |> sd_collect()
+  expect_identical(
+    wk::as_wkt(df$geom),
+    wk::wkt("POINT (0 1)")
+  )
+})
+
+test_that("configure_proj() errors for invalid inputs", {
+  expect_error(
+    sd_configure_proj("not a preset"),
+    "Unknown preset"
+  )
+
+  expect_error(
+    sd_configure_proj(database_path = "file that does not exist"),
+    "Invalid database path"
+  )
+
+  expect_error(
+    sd_configure_proj(search_path = "dir that does not exist"),
+    "Invalid search path"
+  )
+})

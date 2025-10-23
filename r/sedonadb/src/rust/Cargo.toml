@@ -28,12 +28,15 @@ arrow-schema = { workspace = true }
 arrow-array = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+datafusion-ffi = { workspace = true }
 savvy = "*"
 savvy-ffi = "*"
 sedona = { path = "../../../../rust/sedona" }
 sedona-adbc = { path = "../../../../rust/sedona-adbc" }
 sedona-expr = { path = "../../../../rust/sedona-expr" }
 sedona-geoparquet = { path = "../../../../rust/sedona-geoparquet" }
+sedona-proj = { path = "../../../../c/sedona-proj", default-features = false }
 sedona-schema = { path = "../../../../rust/sedona-schema" }
 thiserror = { workspace = true }
 tokio = { workspace = true }

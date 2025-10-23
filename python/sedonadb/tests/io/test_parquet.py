@@ -15,14 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import pytest
+import json
 import tempfile
-import shapely
+from pathlib import Path
+
 import geopandas
 import geopandas.testing
+import pytest
+import shapely
 from pyarrow import parquet
-from pathlib import Path
-from sedonadb.testing import geom_or_null, SedonaDB, DuckDB, skip_if_not_exists
+from sedonadb._lib import SedonaError
+from sedonadb.testing import DuckDB, SedonaDB, geom_or_null, skip_if_not_exists
 
 
 @pytest.mark.parametrize("name", ["water-junc", "water-point"])
@@ -161,6 +164,8 @@ def test_read_geoparquet_prune_points(geoarrow_data, name, predicate):
         "contains",
         "covers",
         "touches",
+        "crosses",
+        "overlaps",
     ],
 )
 def test_read_geoparquet_prune_polygons(sedona_testing, predicate):
@@ -173,9 +178,16 @@ def test_read_geoparquet_prune_polygons(sedona_testing, predicate):
     # A point inside of a polygon for contains / covers
     wkt_filter = "POINT (33.60 -5.54)"
 
+    # Use a wkt_filter that will lead to non-empty results
     if predicate == "touches":
         # A point on the boundary of a polygon
         wkt_filter = "POINT (33.90371119710453 -0.9500000000000001)"
+    elif predicate == "overlaps":
+        # A polygon that intersects the polygon but neither contain each other
+        wkt_filter = "POLYGON ((33 -1.9, 33.00 0, 34 0, 34 -1.9, 33 -1.9))"
+    elif predicate == "crosses":
+        # A linestring that intersects the polygon but is not contained by it
+        wkt_filter = "LINESTRING (33 -1.9, 33.00 0, 34 0, 34 -1.9, 33 -1.9)"
 
     poly_filter = shapely.from_wkt(wkt_filter)
 
@@ -255,6 +267,68 @@ def test_write_geoparquet_geometry(con, geoarrow_data, name):
 
         gdf_roundtrip = geopandas.read_parquet(tmp_parquet)
         geopandas.testing.assert_geodataframe_equal(gdf_roundtrip, gdf)
+
+
+def test_write_geoparquet_1_1(con, geoarrow_data):
+    # Checks GeoParquet 1.1 support specifically
+    path = geoarrow_data / "ns-water" / "files" / "ns-water_water-junc_geo.parquet"
+    skip_if_not_exists(path)
+
+    gdf = geopandas.read_parquet(path).sort_values(by="OBJECTID").reset_index(drop=True)
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp_parquet = Path(td) / "tmp.parquet"
+        con.create_data_frame(gdf).to_parquet(
+            tmp_parquet, sort_by="OBJECTID", geoparquet_version="1.1"
+        )
+
+        file_kv_metadata = parquet.ParquetFile(tmp_parquet).metadata.metadata
+        assert b"geo" in file_kv_metadata
+        geo_metadata = json.loads(file_kv_metadata[b"geo"])
+        assert geo_metadata["version"] == "1.1.0"
+        geo_column = geo_metadata["columns"]["geometry"]
+        assert geo_column["covering"] == {
+            "bbox": {
+                "xmin": ["bbox", "xmin"],
+                "ymin": ["bbox", "ymin"],
+                "xmax": ["bbox", "xmax"],
+                "ymax": ["bbox", "ymax"],
+            }
+        }
+
+        # This should still roundtrip through GeoPandas because GeoPandas removes
+        # the bbox column on read
+        gdf_roundtrip = geopandas.read_parquet(tmp_parquet)
+        assert all(gdf.columns == gdf_roundtrip.columns)
+        geopandas.testing.assert_geodataframe_equal(gdf_roundtrip, gdf)
+
+        # ...but the bbox column should still be there
+        df_roundtrip = con.read_parquet(tmp_parquet).to_pandas()
+        assert "bbox" in df_roundtrip.columns
+
+        # An attempt to rewrite this should fail because it would have to overwrite
+        # the bbox column
+        tmp_parquet2 = Path(td) / "tmp2.parquet"
+        with pytest.raises(
+            SedonaError, match="Can't overwrite GeoParquet 1.1 bbox column 'bbox'"
+        ):
+            con.read_parquet(tmp_parquet).to_parquet(
+                tmp_parquet2, geoparquet_version="1.1"
+            )
+
+        # ...unless we pass the appropriate option
+        con.read_parquet(tmp_parquet).to_parquet(
+            tmp_parquet2, geoparquet_version="1.1", overwrite_bbox_columns=True
+        )
+        df_roundtrip = con.read_parquet(tmp_parquet2).to_pandas()
+        assert "bbox" in df_roundtrip.columns
+
+
+def test_write_geoparquet_unknown(con):
+    with pytest.raises(SedonaError, match="Unexpected GeoParquet version string"):
+        con.sql("SELECT 1 as one").to_parquet(
+            "unused", geoparquet_version="not supported"
+        )
 
 
 def test_write_geoparquet_geography(con, geoarrow_data):

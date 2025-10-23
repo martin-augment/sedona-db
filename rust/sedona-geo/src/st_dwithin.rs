@@ -20,9 +20,9 @@ use arrow_array::builder::BooleanBuilder;
 use arrow_schema::DataType;
 use datafusion_common::{cast::as_float64_array, error::Result};
 use datafusion_expr::ColumnarValue;
-use geo_generic_alg::line_measures::DistanceExt;
 use sedona_expr::scalar_udf::{ScalarKernelRef, SedonaScalarKernel};
 use sedona_functions::executor::WkbExecutor;
+use sedona_geo_generic_alg::line_measures::DistanceExt;
 use sedona_schema::{datatypes::SedonaType, matchers::ArgMatcher};
 use wkb::reader::Wkb;
 
@@ -88,6 +88,7 @@ mod tests {
     use sedona_schema::datatypes::{WKB_GEOMETRY, WKB_VIEW_GEOMETRY};
     use sedona_testing::create::create_scalar;
     use sedona_testing::testers::ScalarUdfTester;
+    use sedona_testing::{compare::assert_array_equal, create::create_array};
 
     use super::*;
 
@@ -96,8 +97,6 @@ mod tests {
         #[values(WKB_GEOMETRY, WKB_VIEW_GEOMETRY)] left_sedona_type: SedonaType,
         #[values(WKB_GEOMETRY, WKB_VIEW_GEOMETRY)] right_sedona_type: SedonaType,
     ) {
-        use sedona_testing::{compare::assert_array_equal, create::create_array};
-
         let udf = SedonaScalarUDF::from_kernel("st_dwithin", st_dwithin_impl());
         let tester = ScalarUdfTester::new(
             udf.into(),

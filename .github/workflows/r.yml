@@ -61,16 +61,19 @@ jobs:
           use-public-rspm: true
 
       - name: Use stable Rust
-        id: rust
+        if: matrix.config.os != 'windows-latest'
         run: |
           rustup toolchain install stable --no-self-update
           rustup default stable
 
-      # GHA runner installs GNU target by default, but --no-self-update might
-      # remove it, so run `target add` to ensure the GNU target installed.
-      - name: Setup Rust (Windows)
+      # Set the default toolchain here so that rust-cache saves/restores
+      # the correct target. (The R package will use this target regardless,
+      # this just in theory helps the cache)
+      - name: Use stable Rust (windows)
         if: matrix.config.os == 'windows-latest'
-        run: rustup target add x86_64-pc-windows-gnu
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --no-self-update
+          rustup default stable-x86_64-pc-windows-gnu
 
       - name: Install dependencies (Linux)
         if: matrix.config.os == 'ubuntu-latest'
@@ -83,7 +86,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # Update this key to force a new cache
-          prefix-key: "r-v2"
+          prefix-key: "r-v3"
+          # The R package uses its own target directory
+          workspaces: ". -> r/sedonadb/src/rust/target"
+
+      # Explicitly specify for Windows, which otherwise chooses a shorter version
+      # to work around a path length limitation when building from longer starting paths.
+      # This allows us to use a common cache configuration for Windows, MacOS, and Linux
+      - name: Set R/Rust target directory
+        if: matrix.config.os == 'windows-latest'
+        run: |
+          echo "SEDONADB_TARGET_DIR=$(pwd -W)/r/sedonadb/src/rust/target" >> $GITHUB_ENV
+        shell: bash
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:

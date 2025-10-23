@@ -344,6 +344,15 @@ class SedonaDB(DBEngine):
         return self.con.sql(query).to_arrow_table()
 
 
+class SedonaDBSingleThread(SedonaDB):
+    """SedonaDB configured for single-threaded execution"""
+
+    def __init__(self):
+        super().__init__()
+        # Force single-threaded execution
+        self.con.sql("SET datafusion.execution.target_partitions TO 1")
+
+
 class DuckDB(DBEngine):
     """A DuckDB implementation of the DBEngine using DuckDB Python"""
 
@@ -393,6 +402,14 @@ class DuckDB(DBEngine):
 
     def execute_and_collect(self, query) -> pa.Table:
         return self.con.sql(query).fetch_arrow_table()
+
+
+class DuckDBSingleThread(DuckDB):
+    """DuckDB configured for single-threaded execution"""
+
+    def __init__(self):
+        super().__init__()
+        self.con.sql("SET threads TO 1")
 
 
 class PostGIS(DBEngine):
@@ -596,6 +613,15 @@ class PostGIS(DBEngine):
                 cur.fetchall()
 
         return col_srid
+
+
+class PostGISSingleThread(PostGIS):
+    """PostGIS configured for single-threaded (no parallel workers) execution"""
+
+    def __init__(self, uri=None):
+        super().__init__(uri)
+        with self.con.cursor() as cur:
+            cur.execute("SET max_parallel_workers_per_gather TO 0")
 
 
 def geom_or_null(arg):

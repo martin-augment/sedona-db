@@ -29,7 +29,8 @@ use sedona_schema::{
     datatypes::{SedonaType, WKB_GEOGRAPHY, WKB_GEOMETRY},
     matchers::ArgMatcher,
 };
-use wkb::writer::write_geometry;
+use wkb::writer::{write_geometry, WriteOptions};
+use wkb::Endianness;
 use wkt::Wkt;
 
 use crate::executor::WkbExecutor;
@@ -39,15 +40,18 @@ use crate::executor::WkbExecutor;
 /// An implementation of WKT reading using GeoRust's wkt crate.
 /// See [`st_geogfromwkt_udf`] for the corresponding geography function.
 pub fn st_geomfromwkt_udf() -> SedonaScalarUDF {
-    SedonaScalarUDF::new_with_aliases(
+    let udf = SedonaScalarUDF::new(
         "st_geomfromwkt",
         vec![Arc::new(STGeoFromWKT {
             out_type: WKB_GEOMETRY,
         })],
         Volatility::Immutable,
         Some(doc("ST_GeomFromWKT", "Geometry")),
-        vec!["st_geomfromtext".to_string()],
-    )
+    );
+    udf.with_aliases(vec![
+        "st_geomfromtext".to_string(),
+        "st_geometryfromtext".to_string(),
+    ])
 }
 
 /// ST_GeogFromWKT() UDF implementation
@@ -55,15 +59,15 @@ pub fn st_geomfromwkt_udf() -> SedonaScalarUDF {
 /// An implementation of WKT reading using GeoRust's wkt crate.
 /// See [`st_geomfromwkt_udf`] for the corresponding geometry function.
 pub fn st_geogfromwkt_udf() -> SedonaScalarUDF {
-    SedonaScalarUDF::new_with_aliases(
+    let udf = SedonaScalarUDF::new(
         "st_geogfromwkt",
         vec![Arc::new(STGeoFromWKT {
             out_type: WKB_GEOGRAPHY,
         })],
         Volatility::Immutable,
         Some(doc("ST_GeogFromWKT", "Geography")),
-        vec!["st_geogfromtext".to_string()],
-    )
+    );
+    udf.with_aliases(vec!["st_geogfromtext".to_string()])
 }
 
 fn doc(name: &str, out_type_name: &str) -> Documentation {
@@ -128,8 +132,14 @@ fn invoke_scalar(wkt_bytes: &str, builder: &mut BinaryBuilder) -> Result<()> {
     let geometry: Wkt<f64> = Wkt::from_str(wkt_bytes)
         .map_err(|err| DataFusionError::Internal(format!("WKT parse error: {err}")))?;
 
-    write_geometry(builder, &geometry, wkb::Endianness::LittleEndian)
-        .map_err(|err| DataFusionError::Internal(format!("WKB write error: {err}")))
+    write_geometry(
+        builder,
+        &geometry,
+        &WriteOptions {
+            endianness: Endianness::LittleEndian,
+        },
+    )
+    .map_err(|err| DataFusionError::Internal(format!("WKB write error: {err}")))
 }
 
 #[cfg(test)]
@@ -208,6 +218,7 @@ mod tests {
     fn aliases() {
         let udf: ScalarUDF = st_geomfromwkt_udf().into();
         assert!(udf.aliases().contains(&"st_geomfromtext".to_string()));
+        assert!(udf.aliases().contains(&"st_geometryfromtext".to_string()));
 
         let udf: ScalarUDF = st_geogfromwkt_udf().into();
         assert!(udf.aliases().contains(&"st_geogfromtext".to_string()));

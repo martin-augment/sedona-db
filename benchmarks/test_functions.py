@@ -16,11 +16,17 @@
 # under the License.
 import pytest
 from test_bench_base import TestBenchBase
-from sedonadb.testing import DuckDB, PostGIS, SedonaDB
+from sedonadb.testing import (
+    DuckDBSingleThread,
+    SedonaDBSingleThread,
+    PostGISSingleThread,
+)
 
 
 class TestBenchFunctions(TestBenchBase):
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -36,7 +42,26 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
+    @pytest.mark.parametrize(
+        "table",
+        [
+            "points_simple",
+        ],
+    )
+    def test_st_azimuth(self, benchmark, eng, table):
+        eng = self._get_eng(eng)
+
+        def queries():
+            eng.execute_and_collect(f"SELECT ST_Azimuth(geom1, geom2) from {table}")
+
+        benchmark(queries)
+
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -52,7 +77,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -68,7 +95,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -84,7 +113,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -100,7 +131,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -116,7 +149,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -132,7 +167,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -148,7 +185,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -164,7 +203,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [
@@ -181,7 +222,9 @@ class TestBenchFunctions(TestBenchBase):
 
         benchmark(queries)
 
-    @pytest.mark.parametrize("eng", [SedonaDB, PostGIS, DuckDB])
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
     @pytest.mark.parametrize(
         "table",
         [

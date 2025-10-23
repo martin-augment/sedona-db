@@ -91,48 +91,81 @@ jobs:
         with:
           path: vcpkg/packages
           # Bump the number at the end of this line to force a new dependency build
-          key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-1
+          key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-2
 
       - name: Install vcpkg dependencies
         if: steps.cache-vcpkg.outputs.cache-hit != 'true'
         run: |
           ./vcpkg/vcpkg install abseil openssl
+          # Clean up vcpkg buildtrees and downloads to save space
+          rm -rf vcpkg/buildtrees
+          rm -rf vcpkg/downloads
 
       - name: Use stable Rust
         id: rust
         run: |
           rustup toolchain install stable --no-self-update
           rustup default stable
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Update this key to force a new cache
-          prefix-key: "rust-${{ matrix.name }}-v2"
+          prefix-key: "rust-${{ matrix.name }}-v4"
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # Free up space by removing tools we don't need
+          tool-cache: false  # Keep tool cache as we need build tools
+          android: true      # Remove Android SDK (not needed)
+          dotnet: true       # Remove .NET runtime (not needed)
+          haskell: true      # Remove Haskell toolchain (not needed)
+          large-packages: false  # Keep essential packages including build-essential
+          swap-storage: true     # Remove swap file to free space
+          docker-images: true    # Remove docker images (not needed)
 
       - name: Install dependencies
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y libgeos-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libgeos-dev
 
       - name: Build
         if: matrix.name == 'build'
         run: |
           cargo build --workspace --all-targets --all-features
+          # Clean up build artifacts aggressively
+          rm -rf target/debug/deps
+          rm -rf target/debug/incremental
+          rm -rf target/debug/build
 
       - name: Clippy
         if: matrix.name == 'clippy'
         run: |
           cargo clippy --workspace --all-targets --all-features -- -Dwarnings
+          # Clean up clippy artifacts aggressively
+          rm -rf target/debug/deps
+          rm -rf target/debug/incremental
+          rm -rf target/debug/build
 
       - name: Test
         if: matrix.name == 'test'
         run: |
           cargo test --workspace --all-targets --all-features
-          # Clean up intermediate build artifacts to free disk space
+          # Clean up intermediate build artifacts to free disk space aggressively
           cargo clean -p sedona-s2geography
+          rm -rf target/debug/deps
+          rm -rf target/debug/incremental
+          rm -rf target/debug/build
+          # Also clean target/.rustc_info.json and other cache files
+          find target/debug -name "*.rlib" -delete
+          find target/debug -name "*.rmeta" -delete
 
       - name: Doctests
         if: matrix.name == 'test'
         run: |
           cargo test --workspace --doc --all-features
+          # Clean up after doctests
+          cargo clean
 
       - name: Check docs
         if: matrix.name == 'docs'

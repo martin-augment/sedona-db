@@ -23,7 +23,8 @@ FEATURE_FLAGS = @FEATURE_FLAGS@
 # Add flags if necessary
 RUSTFLAGS =
 
-TARGET_DIR = $(CURDIR)/rust/target
+# We set this in configure to work around a Windows path length restriction
+TARGET_DIR = @TARGET_DIR@
 LIBDIR = $(TARGET_DIR)/$(TARGET)/$(subst dev,debug,$(PROFILE))
 STATLIB = $(LIBDIR)/libsedonadbr.a
 PKG_LIBS = -L$(LIBDIR) -lsedonadbr -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll  @PKG_LIBS@
@@ -37,9 +38,10 @@ CARGO_LINKER = x86_64-w64-mingw32.static.posix-gcc.exe
 # cf. https://stackoverflow.com/a/68979087
 PKG_CONFIG_SYSROOT_DIR = /x86_64-w64-mingw32.static.posix/
 
-# TODO: should $(CFLAGS) be included here?
-# Do not pass -pedantic
-CFLAGS_TWEAKED = $(subst -pedantic,,$(ALL_CPPFLAGS))
+# "-Wno-pedantic" is to override the "-pedantic" flag passed by pkgbuild, which
+# makes the compilation of aws-lc-sys fail. Hopefully, such C code will be fixed
+# on upstream so that we can remove this.
+CFLAGS_TWEAKED = $(CFLAGS) -Wno-pedantic
 
 all: $(SHLIB) clean_intermediate
 
@@ -51,17 +53,11 @@ $(STATLIB):
 	# in actual, but we need this tweak to please the compiler.
 	mkdir -p $(LIBDIR)/libgcc_mock && touch $(LIBDIR)/libgcc_mock/libgcc_eh.a
 
-	# AWS_LC_SYS_CFLAGS are not ideal: It would be better to use the
-	# CMake builder but this incurs path length errors on at least one Windows builder.
-	# The AWS_LC_SYS_CMAKE_BUILDER environment variable can still be set at a
-	# higher level on Windows environments that support it.
-
 	export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$(CARGO_LINKER)" && \
 	  export LIBRARY_PATH="$${LIBRARY_PATH};$(LIBDIR)/libgcc_mock" && \
 	  export PKG_CONFIG_SYSROOT_DIR="$(PKG_CONFIG_SYSROOT_DIR)" && \
 	  export CC="$(CC)" && \
 	  export CFLAGS="$(CFLAGS_TWEAKED)" && \
-	  export AWS_LC_SYS_CFLAGS="$(CFLAGS_TWEAKED) -O0" && \
 	  export RUSTFLAGS="$(RUSTFLAGS)" && \
 	  cargo build --target $(TARGET) --lib --profile $(PROFILE) $(FEATURE_FLAGS) --manifest-path ./rust/Cargo.toml --target-dir $(TARGET_DIR)
 

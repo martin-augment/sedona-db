@@ -21,15 +21,20 @@ use arrow_array::ffi::FFI_ArrowSchema;
 use arrow_array::ffi_stream::FFI_ArrowArrayStream;
 use arrow_array::{RecordBatchIterator, RecordBatchReader};
 use datafusion::catalog::MemTable;
-use datafusion::prelude::DataFrame;
-use savvy::{savvy, savvy_err, Result};
-use sedona::context::SedonaDataFrame;
+use datafusion::{logical_expr::SortExpr, prelude::DataFrame};
+use datafusion_common::Column;
+use datafusion_expr::Expr;
+use datafusion_ffi::table_provider::FFI_TableProvider;
+use savvy::{savvy, savvy_err, IntoExtPtrSexp, Result};
+use sedona::context::{SedonaDataFrame, SedonaWriteOptions};
 use sedona::reader::SedonaStreamReader;
 use sedona::show::{DisplayMode, DisplayTableOptions};
+use sedona_geoparquet::options::{GeoParquetVersion, TableGeoParquetOptions};
 use sedona_schema::schema::SedonaSchema;
 use tokio::runtime::Runtime;
 
 use crate::context::InternalContext;
+use crate::ffi::{import_schema, FFITableProviderR};
 use crate::runtime::wait_for_future_captured_r;
 
 #[savvy]
@@ -83,10 +88,20 @@ impl InternalDataFrame {
         Ok(())
     }
 
-    fn to_arrow_stream(&self, out: savvy::Sexp) -> Result<()> {
+    fn to_arrow_stream(&self, out: savvy::Sexp, requested_schema_xptr: savvy::Sexp) -> Result<()> {
         let out_void = unsafe { savvy_ffi::R_ExternalPtrAddr(out.0) };
         if out_void.is_null() {
             return Err(savvy_err!("external pointer to null in to_arrow_stream()"));
+        }
+
+        let maybe_requested_schema = if requested_schema_xptr.is_null() {
+            None
+        } else {
+            Some(import_schema(requested_schema_xptr))
+        };
+
+        if maybe_requested_schema.is_some() {
+            return Err(savvy_err!("Requested schema is not supported"));
         }
 
         let inner = self.inner.clone();
@@ -104,6 +119,21 @@ impl InternalDataFrame {
         unsafe { swap_nonoverlapping(&mut ffi_stream, ffi_out, 1) };
 
         Ok(())
+    }
+
+    fn to_provider(&self) -> Result<savvy::Sexp> {
+        let provider = self.inner.clone().into_view();
+        // Literal true is because the TableProvider that wraps this DataFrame
+        // can support filters being pushed down.
+        let ffi_provider =
+            FFI_TableProvider::new(provider, true, Some(self.runtime.handle().clone()));
+
+        let mut ffi_xptr = FFITableProviderR(ffi_provider).into_external_pointer();
+        unsafe { savvy_ffi::Rf_protect(ffi_xptr.0) };
+        ffi_xptr.set_class(vec!["datafusion_table_provider"])?;
+        unsafe { savvy_ffi::Rf_unprotect(1) };
+
+        Ok(ffi_xptr)
     }
 
     fn compute(&self, ctx: &InternalContext) -> Result<InternalDataFrame> {
@@ -190,5 +220,64 @@ impl InternalDataFrame {
         })??;
 
         savvy::Sexp::try_from(out_string)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn to_parquet(
+        &self,
+        ctx: &InternalContext,
+        path: &str,
+        partition_by: savvy::Sexp,
+        sort_by: savvy::Sexp,
+        single_file_output: bool,
+        overwrite_bbox_columns: bool,
+        geoparquet_version: Option<&str>,
+    ) -> savvy::Result<()> {
+        let partition_by_strsxp = savvy::StringSexp::try_from(partition_by)?;
+        let partition_by_vec = partition_by_strsxp
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+
+        let sort_by_strsxp = savvy::StringSexp::try_from(sort_by)?;
+        let sort_by_vec = sort_by_strsxp
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+
+        let sort_by_expr = sort_by_vec
+            .iter()
+            .map(|name| {
+                let column = Expr::Column(Column::new_unqualified(name));
+                SortExpr::new(column, true, false)
+            })
+            .collect::<Vec<_>>();
+
+        let options = SedonaWriteOptions::new()
+            .with_partition_by(partition_by_vec)
+            .with_sort_by(sort_by_expr)
+            .with_single_file_output(single_file_output);
+
+        let mut writer_options = TableGeoParquetOptions::new();
+        writer_options.overwrite_bbox_columns = overwrite_bbox_columns;
+        if let Some(geoparquet_version) = geoparquet_version {
+            writer_options.geoparquet_version = geoparquet_version
+                .parse()
+                .map_err(|e| savvy::Error::new(format!("Invalid geoparquet_version: {e}")))?;
+        } else {
+            writer_options.geoparquet_version = GeoParquetVersion::Omitted;
+        }
+
+        let inner = self.inner.clone();
+        let inner_context = ctx.inner.clone();
+        let path_owned = path.to_string();
+
+        wait_for_future_captured_r(&self.runtime, async move {
+            inner
+                .write_geoparquet(&inner_context, &path_owned, options, Some(writer_options))
+                .await
+        })??;
+
+        Ok(())
     }
 }

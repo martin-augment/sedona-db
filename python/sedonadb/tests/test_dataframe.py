@@ -14,15 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
+import tempfile
+from pathlib import Path
+
 import geoarrow.pyarrow as ga
 import geoarrow.types as gat
 import geopandas.testing
 import pandas as pd
-from pathlib import Path
 import pyarrow as pa
 import pytest
 import sedonadb
-import tempfile
+from sedonadb.testing import skip_if_not_exists
 
 
 def test_dataframe_from_dataframe(con):
@@ -159,6 +162,14 @@ def test_schema(con):
         df.schema.field({})
 
 
+def test_columns(con):
+    df = con.sql("SELECT 1 as one, ST_GeomFromWKT('POINT (0 1)') as geom")
+    assert len(df.columns) == 2
+
+    pdf = df.to_pandas()
+    assert set(df.columns) == set(pdf.columns)
+
+
 def test_schema_non_null_crs(con):
     tab = pa.table({"geom": ga.with_crs(ga.as_wkb(["POINT (0 1)"]), gat.OGC_CRS84)})
     df = con.create_data_frame(tab)
@@ -255,6 +266,35 @@ def test_dataframe_to_arrow(con):
         df.to_arrow_table(schema=pa.schema({}))
 
 
+def test_dataframe_to_arrow_empty_batches(con, geoarrow_data):
+    # It's difficult to trigger this with a simpler example
+    # https://github.com/apache/sedona-db/issues/156
+    path_water_junc = (
+        geoarrow_data / "ns-water" / "files" / "ns-water_water-junc_geo.parquet"
+    )
+    path_water_point = (
+        geoarrow_data / "ns-water" / "files" / "ns-water_water-point_geo.parquet"
+    )
+    skip_if_not_exists(path_water_junc)
+    skip_if_not_exists(path_water_point)
+
+    con.read_parquet(path_water_junc).to_view("junc", overwrite=True)
+    con.read_parquet(path_water_point).to_view("point", overwrite=True)
+    con.sql("""SELECT geometry FROM junc WHERE "OBJECTID" = 1814""").to_view(
+        "junc_filter", overwrite=True
+    )
+
+    joined = con.sql("""
+        SELECT "OBJECTID", "FEAT_CODE", point.geometry
+        FROM point
+        JOIN junc_filter ON ST_DWithin(junc_filter.geometry, point.geometry, 10000)
+    """)
+
+    reader = pa.RecordBatchReader.from_stream(joined)
+    batch_rows = [len(batch) for batch in reader]
+    assert batch_rows == [24]
+
+
 def test_dataframe_to_pandas(con):
     # Check with a geometry column
     df_with_geo = con.sql("SELECT 1 as one, ST_GeomFromWKT('POINT (0 1)') as geom")
@@ -340,6 +380,24 @@ def test_dataframe_to_parquet(con):
             pd.read_parquet(tmp_parquet),
             pd.DataFrame({"a": ["one", "three", "two"], "b": [1, 3, 2]}),
         )
+
+
+def test_record_batch_reader_projection(con):
+    def batches():
+        for _ in range(3):
+            yield pa.record_batch({"a": ["a", "b", "c"], "b": [1, 2, 3]})
+
+    reader = pa.RecordBatchReader.from_batches(next(batches()).schema, batches())
+    df = con.create_data_frame(reader)
+    df.to_view("temp_rbr_proj", overwrite=True)
+    try:
+        # Query the view with projection (only select column b)
+        proj_df = con.sql("SELECT b FROM temp_rbr_proj")
+        tbl = proj_df.to_arrow_table()
+        assert tbl.column_names == ["b"]
+        assert tbl.to_pydict()["b"] == [1, 2, 3] * 3
+    finally:
+        con.drop_view("temp_rbr_proj")
 
 
 def test_show(con, capsys):

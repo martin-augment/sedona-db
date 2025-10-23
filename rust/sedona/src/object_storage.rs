@@ -617,15 +617,14 @@ pub(crate) async fn register_object_store_and_config_extensions(
 
 #[cfg(test)]
 mod tests {
-    use crate::context::SedonaContext;
-
-    use super::*;
-
     use datafusion::common::plan_err;
     use datafusion::{
         datasource::listing::ListingTableUrl,
         logical_expr::{DdlStatement, LogicalPlan},
     };
+
+    use super::*;
+    use crate::context::SedonaContext;
 
     #[cfg(feature = "aws")]
     use object_store::{aws::AmazonS3ConfigKey, gcp::GoogleConfigKey};

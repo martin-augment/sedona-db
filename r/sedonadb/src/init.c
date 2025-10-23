@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <stdint.h>
+
 #include <Rinternals.h>
 
 #include <R_ext/Parse.h>
-#include <stdint.h>
 
 #include "rust/api.h"
 
@@ -51,6 +52,14 @@ SEXP handle_result(SEXP res_) {
   return (SEXP)res;
 }
 
+SEXP savvy_configure_proj_shared__impl(SEXP c_arg__shared_library_path,
+                                       SEXP c_arg__database_path,
+                                       SEXP c_arg__search_path) {
+  SEXP res = savvy_configure_proj_shared__ffi(
+      c_arg__shared_library_path, c_arg__database_path, c_arg__search_path);
+  return handle_result(res);
+}
+
 SEXP savvy_init_r_runtime__impl(DllInfo *c_arg___dll_info) {
   SEXP res = savvy_init_r_runtime__ffi(c_arg___dll_info);
   return handle_result(res);
@@ -75,6 +84,13 @@ SEXP savvy_InternalContext_data_frame_from_array_stream__impl(
   return handle_result(res);
 }
 
+SEXP savvy_InternalContext_data_frame_from_table_provider__impl(
+    SEXP self__, SEXP c_arg__provider_xptr) {
+  SEXP res = savvy_InternalContext_data_frame_from_table_provider__ffi(
+      self__, c_arg__provider_xptr);
+  return handle_result(res);
+}
+
 SEXP savvy_InternalContext_deregister_table__impl(SEXP self__,
                                                   SEXP c_arg__table_ref) {
   SEXP res =
@@ -89,6 +105,19 @@ SEXP savvy_InternalContext_new__impl(void) {
 
 SEXP savvy_InternalContext_read_parquet__impl(SEXP self__, SEXP c_arg__paths) {
   SEXP res = savvy_InternalContext_read_parquet__ffi(self__, c_arg__paths);
+  return handle_result(res);
+}
+
+SEXP savvy_InternalContext_register_scalar_udf__impl(
+    SEXP self__, SEXP c_arg__scalar_udf_xptr) {
+  SEXP res = savvy_InternalContext_register_scalar_udf__ffi(
+      self__, c_arg__scalar_udf_xptr);
+  return handle_result(res);
+}
+
+SEXP savvy_InternalContext_scalar_udf_xptr__impl(SEXP self__,
+                                                 SEXP c_arg__name) {
+  SEXP res = savvy_InternalContext_scalar_udf_xptr__ffi(self__, c_arg__name);
   return handle_result(res);
 }
 
@@ -141,9 +170,26 @@ SEXP savvy_InternalDataFrame_to_arrow_schema__impl(SEXP self__,
   return handle_result(res);
 }
 
-SEXP savvy_InternalDataFrame_to_arrow_stream__impl(SEXP self__,
-                                                   SEXP c_arg__out) {
-  SEXP res = savvy_InternalDataFrame_to_arrow_stream__ffi(self__, c_arg__out);
+SEXP savvy_InternalDataFrame_to_arrow_stream__impl(
+    SEXP self__, SEXP c_arg__out, SEXP c_arg__requested_schema_xptr) {
+  SEXP res = savvy_InternalDataFrame_to_arrow_stream__ffi(
+      self__, c_arg__out, c_arg__requested_schema_xptr);
+  return handle_result(res);
+}
+
+SEXP savvy_InternalDataFrame_to_parquet__impl(
+    SEXP self__, SEXP c_arg__ctx, SEXP c_arg__path, SEXP c_arg__partition_by,
+    SEXP c_arg__sort_by, SEXP c_arg__single_file_output,
+    SEXP c_arg__overwrite_bbox_columns, SEXP c_arg__geoparquet_version) {
+  SEXP res = savvy_InternalDataFrame_to_parquet__ffi(
+      self__, c_arg__ctx, c_arg__path, c_arg__partition_by, c_arg__sort_by,
+      c_arg__single_file_output, c_arg__overwrite_bbox_columns,
+      c_arg__geoparquet_version);
+  return handle_result(res);
+}
+
+SEXP savvy_InternalDataFrame_to_provider__impl(SEXP self__) {
+  SEXP res = savvy_InternalDataFrame_to_provider__ffi(self__);
   return handle_result(res);
 }
 
@@ -156,18 +202,26 @@ SEXP savvy_InternalDataFrame_to_view__impl(SEXP self__, SEXP c_arg__ctx,
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"savvy_configure_proj_shared__impl",
+     (DL_FUNC)&savvy_configure_proj_shared__impl, 3},
     {"savvy_init_r_runtime_interrupts__impl",
      (DL_FUNC)&savvy_init_r_runtime_interrupts__impl, 2},
     {"savvy_sedonadb_adbc_init_func__impl",
      (DL_FUNC)&savvy_sedonadb_adbc_init_func__impl, 0},
     {"savvy_InternalContext_data_frame_from_array_stream__impl",
      (DL_FUNC)&savvy_InternalContext_data_frame_from_array_stream__impl, 3},
+    {"savvy_InternalContext_data_frame_from_table_provider__impl",
+     (DL_FUNC)&savvy_InternalContext_data_frame_from_table_provider__impl, 2},
     {"savvy_InternalContext_deregister_table__impl",
      (DL_FUNC)&savvy_InternalContext_deregister_table__impl, 2},
     {"savvy_InternalContext_new__impl",
      (DL_FUNC)&savvy_InternalContext_new__impl, 0},
     {"savvy_InternalContext_read_parquet__impl",
      (DL_FUNC)&savvy_InternalContext_read_parquet__impl, 2},
+    {"savvy_InternalContext_register_scalar_udf__impl",
+     (DL_FUNC)&savvy_InternalContext_register_scalar_udf__impl, 2},
+    {"savvy_InternalContext_scalar_udf_xptr__impl",
+     (DL_FUNC)&savvy_InternalContext_scalar_udf_xptr__impl, 2},
     {"savvy_InternalContext_sql__impl",
      (DL_FUNC)&savvy_InternalContext_sql__impl, 2},
     {"savvy_InternalContext_view__impl",
@@ -187,7 +241,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"savvy_InternalDataFrame_to_arrow_schema__impl",
      (DL_FUNC)&savvy_InternalDataFrame_to_arrow_schema__impl, 2},
     {"savvy_InternalDataFrame_to_arrow_stream__impl",
-     (DL_FUNC)&savvy_InternalDataFrame_to_arrow_stream__impl, 2},
+     (DL_FUNC)&savvy_InternalDataFrame_to_arrow_stream__impl, 3},
+    {"savvy_InternalDataFrame_to_parquet__impl",
+     (DL_FUNC)&savvy_InternalDataFrame_to_parquet__impl, 8},
+    {"savvy_InternalDataFrame_to_provider__impl",
+     (DL_FUNC)&savvy_InternalDataFrame_to_provider__impl, 1},
     {"savvy_InternalDataFrame_to_view__impl",
      (DL_FUNC)&savvy_InternalDataFrame_to_view__impl, 4},
     {NULL, NULL, 0}};
