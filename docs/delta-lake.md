@@ -134,5 +134,3 @@ res.schema
       name: utf8<Utf8>
       continent: utf8<Utf8>
       geom: geometry<Wkb>
-
-
