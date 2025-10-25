@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::executor::WkbBytesExecutor;
 use arrow_array::builder::BooleanBuilder;
 use arrow_schema::DataType;
-use datafusion_common::error::Result;
+use datafusion_common::{error::Result, DataFusionError};
 use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
@@ -108,8 +108,10 @@ impl SedonaScalarKernel for STHasZm {
 
 /// Fast-path inference of geometry type name from raw WKB bytes
 fn invoke_scalar(buf: &[u8], dim_index: usize) -> Result<Option<bool>> {
-    let header = WkbHeader::try_new(buf)?;
-    let top_level_dimensions = header.dimensions()?;
+    let header = WkbHeader::try_new(buf).map_err(|e| DataFusionError::External(Box::new(e)))?;
+    let top_level_dimensions = header
+        .dimensions()
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
     // Infer dimension based on first coordinate dimension for cases where it differs from top-level
     // e.g GEOMETRYCOLLECTION (POINT Z (1 2 3))
