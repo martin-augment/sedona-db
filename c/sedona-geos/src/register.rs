@@ -17,11 +17,18 @@
 use sedona_expr::scalar_udf::ScalarKernelRef;
 
 use crate::{
-    distance::st_distance_impl, st_area::st_area_impl, st_buffer::st_buffer_impl,
-    st_centroid::st_centroid_impl, st_convexhull::st_convex_hull_impl, st_dwithin::st_dwithin_impl,
-    st_isring::st_is_ring_impl, st_isvalid::st_is_valid_impl,
-    st_isvalidreason::st_is_valid_reason_impl, st_length::st_length_impl,
-    st_perimeter::st_perimeter_impl, st_unaryunion::st_unary_union_impl,
+    distance::st_distance_impl,
+    st_area::st_area_impl,
+    st_buffer::{st_buffer_impl, st_buffer_style_impl},
+    st_centroid::st_centroid_impl,
+    st_convexhull::st_convex_hull_impl,
+    st_dwithin::st_dwithin_impl,
+    st_isring::st_is_ring_impl,
+    st_isvalid::st_is_valid_impl,
+    st_isvalidreason::st_is_valid_reason_impl,
+    st_length::st_length_impl,
+    st_perimeter::st_perimeter_impl,
+    st_unaryunion::st_unary_union_impl,
 };
 
 use crate::binary_predicates::{
@@ -37,6 +44,7 @@ pub fn scalar_kernels() -> Vec<(&'static str, ScalarKernelRef)> {
     vec![
         ("st_area", st_area_impl()),
         ("st_buffer", st_buffer_impl()),
+        ("st_buffer_style", st_buffer_style_impl()),
         ("st_centroid", st_centroid_impl()),
         ("st_contains", st_contains_impl()),
         ("st_convexhull", st_convex_hull_impl()),

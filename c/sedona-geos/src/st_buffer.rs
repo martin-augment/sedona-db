@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
+use datafusion_common::cast::as_float64_array;
 use datafusion_common::error::Result;
 use datafusion_common::{DataFusionError, ScalarValue};
 use datafusion_expr::ColumnarValue;
@@ -33,10 +34,9 @@ use crate::executor::GeosExecutor;
 
 /// ST_Buffer() implementation using the geos crate
 ///
-/// Supports three signatures:
+/// Supports two signatures:
 /// - ST_Buffer(geometry: Geometry, distance: Double)
-/// - ST_Buffer(geometry: Geometry, distance: Double, useSpheroid: Boolean)
-/// - ST_Buffer(geometry: Geometry, distance: Double, useSpheroid: Boolean, bufferStyleParameters: String)
+/// - ST_Buffer(geometry: Geometry, distance: Double, bufferStyleParameters: String)
 ///
 /// Buffer style parameters format: "key1=value1 key2=value2 ..."
 /// Supported parameters:
@@ -54,23 +54,12 @@ struct STBuffer {}
 
 impl SedonaScalarKernel for STBuffer {
     fn return_type(&self, args: &[SedonaType]) -> Result<Option<SedonaType>> {
-        if !(2..=4).contains(&args.len()) {
-            return Err(DataFusionError::Plan(format!(
-                "ST_Buffer expects 2-4 arguments, got {}",
-                args.len()
-            )));
-        }
+        let matcher = ArgMatcher::new(
+            vec![ArgMatcher::is_geometry(), ArgMatcher::is_numeric()],
+            WKB_GEOMETRY,
+        );
 
-        let mut matchers = vec![ArgMatcher::is_geometry(), ArgMatcher::is_numeric()];
-
-        if args.len() >= 3 {
-            matchers.push(ArgMatcher::is_boolean());
-        }
-        if args.len() == 4 {
-            matchers.push(ArgMatcher::is_string());
-        }
-
-        ArgMatcher::new(matchers, WKB_GEOMETRY).match_args(args)
+        matcher.match_args(args)
     }
 
     fn invoke_batch(
@@ -78,33 +67,71 @@ impl SedonaScalarKernel for STBuffer {
         arg_types: &[SedonaType],
         args: &[ColumnarValue],
     ) -> Result<ColumnarValue> {
-        // Extract Args
-        let distance: Option<f64> = extract_optional_f64(&args[1])?;
-        let _use_spheroid = extract_optional_bool(args.get(2))?;
-        let buffer_style_params = extract_optional_string(args.get(3))?;
-
-        // Build BufferParams based on style parameters
-        let params = parse_buffer_params(buffer_style_params.as_deref())?;
-
-        let executor = GeosExecutor::new(arg_types, args);
-        let mut builder = BinaryBuilder::with_capacity(
-            executor.num_iterations(),
-            WKB_MIN_PROBABLE_BYTES * executor.num_iterations(),
-        );
-        executor.execute_wkb_void(|wkb| {
-            match (wkb, distance) {
-                (Some(wkb), Some(distance)) => {
-                    invoke_scalar(&wkb, distance, &params, &mut builder)?;
-                    builder.append_value([]);
-                }
-                _ => builder.append_null(),
-            }
-
-            Ok(())
-        })?;
-
-        executor.finish(Arc::new(builder.finish()))
+        invoke_batch_impl(arg_types, args)
     }
+}
+
+pub fn st_buffer_style_impl() -> ScalarKernelRef {
+    Arc::new(STBufferStyle {})
+}
+#[derive(Debug)]
+struct STBufferStyle {}
+
+impl SedonaScalarKernel for STBufferStyle {
+    fn return_type(&self, args: &[SedonaType]) -> Result<Option<SedonaType>> {
+        let matcher = ArgMatcher::new(
+            vec![
+                ArgMatcher::is_geometry(),
+                ArgMatcher::is_numeric(),
+                ArgMatcher::is_string(),
+            ],
+            WKB_GEOMETRY,
+        );
+
+        matcher.match_args(args)
+    }
+
+    fn invoke_batch(
+        &self,
+        arg_types: &[SedonaType],
+        args: &[ColumnarValue],
+    ) -> Result<ColumnarValue> {
+        invoke_batch_impl(arg_types, args)
+    }
+}
+
+fn invoke_batch_impl(arg_types: &[SedonaType], args: &[ColumnarValue]) -> Result<ColumnarValue> {
+    let executor = GeosExecutor::new(arg_types, args);
+    let mut builder = BinaryBuilder::with_capacity(
+        executor.num_iterations(),
+        WKB_MIN_PROBABLE_BYTES * executor.num_iterations(),
+    );
+
+    // Extract Args
+    let distance_value = args[1]
+        .cast_to(&DataType::Float64, None)?
+        .to_array(executor.num_iterations())?;
+    let distance_array = as_float64_array(&distance_value)?;
+    let mut distance_iter = distance_array.iter();
+
+    let buffer_style_params = extract_optional_string(args.get(2))?;
+
+    // Build BufferParams based on style parameters
+    let params = parse_buffer_params(buffer_style_params.as_deref())?;
+
+    executor.execute_wkb_void(|wkb| {
+        match (wkb, distance_iter.next().unwrap()) {
+            (Some(wkb), Some(distance)) => {
+                invoke_scalar(&wkb, distance, &params, &mut builder)?;
+                builder.append_value([]);
+            }
+            _ => builder.append_null(),
+        }
+
+        Ok(())
+    })?;
+
+    executor.finish(Arc::new(builder.finish()))
 }
 
 fn invoke_scalar(
@@ -122,35 +149,6 @@ fn invoke_scalar(
 
     writer.write_all(wkb.as_ref())?;
     Ok(())
-}
-
-fn extract_optional_f64(arg: &ColumnarValue) -> Result<Option<f64>> {
-    let casted = arg.cast_to(&DataType::Float64, None)?;
-    match &casted {
-        ColumnarValue::Scalar(scalar) if !scalar.is_null() => {
-            Ok(Some(f64::try_from(scalar.clone())?))
-        }
-        ColumnarValue::Scalar(_) => Ok(None),
-        _ => Err(DataFusionError::Execution(format!(
-            "Expected scalar distance, got: {:?}",
-            arg
-        ))),
-    }
-}
-
-fn extract_optional_bool(arg: Option<&ColumnarValue>) -> Result<Option<bool>> {
-    let Some(arg) = arg else { return Ok(None) };
-    let casted = arg.cast_to(&DataType::Boolean, None)?;
-    match &casted {
-        ColumnarValue::Scalar(scalar) if !scalar.is_null() => {
-            Ok(Some(bool::try_from(scalar.clone())?))
-        }
-        ColumnarValue::Scalar(_) => Ok(None),
-        _ => Err(DataFusionError::Execution(format!(
-            "Expected scalar useSpheroid parameter, got: {:?}",
-            arg
-        ))),
-    }
 }
 
 fn extract_optional_string(arg: Option<&ColumnarValue>) -> Result<Option<String>> {
@@ -305,13 +303,12 @@ mod tests {
 
     #[rstest]
     fn udf_with_buffer_params(#[values(WKB_GEOMETRY, WKB_VIEW_GEOMETRY)] sedona_type: SedonaType) {
-        let udf = SedonaScalarUDF::from_kernel("st_buffer", st_buffer_impl());
+        let udf = SedonaScalarUDF::from_kernel("st_buffer_style", st_buffer_style_impl());
         let tester = ScalarUdfTester::new(
             udf.into(),
             vec![
                 sedona_type.clone(),
                 SedonaType::Arrow(DataType::Float64),
-                SedonaType::Arrow(DataType::Boolean),
                 SedonaType::Arrow(DataType::Utf8),
             ],
         );
@@ -323,7 +320,6 @@ mod tests {
                     "LINESTRING (0 0, 10 0)",
                 )))),
                 ColumnarValue::Scalar(ScalarValue::Float64(Some(1.0))),
-                ColumnarValue::Scalar(ScalarValue::Boolean(Some(false))),
                 ColumnarValue::Scalar(ScalarValue::Utf8(Some(
                     "endcap=flat join=mitre quad_segs=2".to_string(),
                 ))),
@@ -338,7 +334,6 @@ mod tests {
                     "LINESTRING (0 0, 10 0)",
                 )))),
                 ColumnarValue::Scalar(ScalarValue::Float64(Some(1.0))),
-                ColumnarValue::Scalar(ScalarValue::Boolean(Some(false))),
                 ColumnarValue::Scalar(ScalarValue::Utf8(Some(
                     "endcap=square join=bevel".to_string(),
                 ))),
