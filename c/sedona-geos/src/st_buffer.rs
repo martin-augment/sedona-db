@@ -178,7 +178,10 @@ fn parse_buffer_params(params_str: Option<&str>) -> Result<BufferParams> {
 
     for param in params_str.split_whitespace() {
         let Some((key, value)) = param.split_once('=') else {
-            continue;
+            return Err(DataFusionError::Execution(format!(
+                "Missing value for buffer parameter: {}",
+                param
+            )));
         };
 
         match key.to_lowercase().as_str() {
@@ -192,14 +195,19 @@ fn parse_buffer_params(params_str: Option<&str>) -> Result<BufferParams> {
                 params_builder = params_builder.single_sided(parse_side(value)?);
             }
             "mitre_limit" | "miter_limit" => {
-                let limit = parse_number(value, "mitre_limit")?;
+                let limit: f64 = parse_number(value, "mitre_limit")?;
                 params_builder = params_builder.mitre_limit(limit);
             }
             "quad_segs" | "quadrant_segments" => {
                 let segs = parse_number(value, "quadrant_segments")?;
                 params_builder = params_builder.quadrant_segments(segs);
             }
-            _ => {}
+            _ => {
+                return Err(DataFusionError::Execution(format!(
+                    "Invalid buffer parameter: {} (accept: 'endcap', 'join', 'mitre_limit', 'miter_limit', 'quad_segs' and 'side')",
+                    key.to_lowercase()
+                )));
+            }
         }
     }
 
@@ -379,5 +387,132 @@ mod tests {
             .invoke_scalar(buffer_result_low_segs)
             .unwrap();
         tester.assert_scalar_result_equals(envelope_result_low_segs, expected_envelope);
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_endcap() {
+        let err = parse_buffer_params(Some("endcap=invalid")).err().unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid endcap style: 'invalid'. Valid options: round, flat, butt, square"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_join() {
+        let err = parse_buffer_params(Some("join=invalid")).err().unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid join style: 'invalid'. Valid options: round, mitre, miter, bevel"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_side() {
+        let err = parse_buffer_params(Some("side=invalid")).err().unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid side: 'invalid'. Valid options: both, left, right"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_mitre_limit() {
+        let err = parse_buffer_params(Some("mitre_limit=not_a_number"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid mitre_limit value: 'not_a_number'. Expected a valid number"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_miter_limit() {
+        let err = parse_buffer_params(Some("miter_limit=abc")).err().unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid mitre_limit value: 'abc'. Expected a valid number"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_quad_segs() {
+        let err = parse_buffer_params(Some("quad_segs=not_an_int"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid quadrant_segments value: 'not_an_int'. Expected a valid number"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_quadrant_segments() {
+        let err = parse_buffer_params(Some("quadrant_segments=xyz"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid quadrant_segments value: 'xyz'. Expected a valid number"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_multiple_invalid_params() {
+        // Test that the first invalid parameter is caught
+        let err = parse_buffer_params(Some("endcap=wrong join=mitre"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid endcap style: 'wrong'. Valid options: round, flat, butt, square"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_mixed_with_valid() {
+        // Test invalid parameter after valid ones
+        let err = parse_buffer_params(Some("endcap=round join=invalid"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid join style: 'invalid'. Valid options: round, mitre, miter, bevel"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_invalid_param_name() {
+        let err = parse_buffer_params(Some("unknown_param=value"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Invalid buffer parameter: unknown_param (accept: 'endcap', 'join', 'mitre_limit', 'miter_limit', 'quad_segs' and 'side')"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_missing_value() {
+        let err = parse_buffer_params(Some("endcap=round bare_param join=mitre"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.message(),
+            "Missing value for buffer parameter: bare_param"
+        );
+    }
+
+    #[test]
+    fn test_parse_buffer_params_duplicate_params_no_error() {
+        let result = parse_buffer_params(Some("endcap=round endcap=flat"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_buffer_params_quad_segs_out_of_range() {
+        let result = parse_buffer_params(Some("quad_segs=-5"));
+        assert!(result.is_ok());
     }
 }
