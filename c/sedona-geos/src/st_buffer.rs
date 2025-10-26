@@ -303,7 +303,7 @@ mod tests {
 
     #[rstest]
     fn udf_with_buffer_params(#[values(WKB_GEOMETRY, WKB_VIEW_GEOMETRY)] sedona_type: SedonaType) {
-        let udf = SedonaScalarUDF::from_kernel("st_buffer_style", st_buffer_style_impl());
+        let udf = SedonaScalarUDF::from_kernel("st_buffer", st_buffer_style_impl());
         let tester = ScalarUdfTester::new(
             udf.into(),
             vec![
@@ -314,32 +314,70 @@ mod tests {
         );
         tester.assert_return_type(WKB_GEOMETRY);
 
+        let envelope_udf = sedona_functions::st_envelope::st_envelope_udf();
+        let envelope_tester = ScalarUdfTester::new(envelope_udf.into(), vec![WKB_GEOMETRY]);
+
         let buffer_result = tester
-            .invoke(vec![
-                ColumnarValue::Scalar(ScalarValue::Binary(Some(sedona_testing::create::make_wkb(
-                    "LINESTRING (0 0, 10 0)",
-                )))),
-                ColumnarValue::Scalar(ScalarValue::Float64(Some(1.0))),
-                ColumnarValue::Scalar(ScalarValue::Utf8(Some(
-                    "endcap=flat join=mitre quad_segs=2".to_string(),
-                ))),
-            ])
+            .invoke_scalar_scalar_scalar(
+                "LINESTRING (0 0, 10 0)",
+                2.0,
+                "endcap=flat join=mitre quad_segs=2".to_string(),
+            )
+            .unwrap();
+        let envelope_result = envelope_tester.invoke_scalar(buffer_result).unwrap();
+        let expected_envelope = "POLYGON((0 -2, 0 2, 10 2, 10 -2, 0 -2))";
+        tester.assert_scalar_result_equals(envelope_result, expected_envelope);
+
+        let buffer_result = tester
+            .invoke_scalar_scalar_scalar(
+                "LINESTRING (0 0, 10 0)",
+                1.0,
+                "endcap=square join=bevel".to_string(),
+            )
+            .unwrap();
+        let envelope_result = envelope_tester.invoke_scalar(buffer_result).unwrap();
+        let expected_envelope = "POLYGON((-1 -1, -1 1, 11 1, 11 -1, -1 -1))";
+        tester.assert_scalar_result_equals(envelope_result, expected_envelope);
+    }
+
+    #[rstest]
+    fn udf_with_quad_segs(#[values(WKB_GEOMETRY, WKB_VIEW_GEOMETRY)] sedona_type: SedonaType) {
+        let udf = SedonaScalarUDF::from_kernel("st_buffer", st_buffer_style_impl());
+        let tester = ScalarUdfTester::new(
+            udf.into(),
+            vec![
+                sedona_type.clone(),
+                SedonaType::Arrow(DataType::Float64),
+                SedonaType::Arrow(DataType::Utf8),
+            ],
+        );
+        tester.assert_return_type(WKB_GEOMETRY);
+
+        let envelope_udf = sedona_functions::st_envelope::st_envelope_udf();
+        let envelope_tester = ScalarUdfTester::new(envelope_udf.into(), vec![WKB_GEOMETRY]);
+        let input_wkt = "POINT (5 5)";
+        let buffer_dist = 3.0;
+
+        let buffer_result_default = tester
+            .invoke_scalar_scalar_scalar(input_wkt, buffer_dist, "endcap=round".to_string())
+            .unwrap();
+        let envelope_result_default = envelope_tester
+            .invoke_scalar(buffer_result_default)
             .unwrap();
 
-        assert!(matches!(buffer_result, ColumnarValue::Scalar(_)));
+        let expected_envelope = "POLYGON((2 2, 2 8, 8 8, 8 2, 2 2))";
+        tester.assert_scalar_result_equals(envelope_result_default, expected_envelope);
 
-        let buffer_result2 = tester
-            .invoke(vec![
-                ColumnarValue::Scalar(ScalarValue::Binary(Some(sedona_testing::create::make_wkb(
-                    "LINESTRING (0 0, 10 0)",
-                )))),
-                ColumnarValue::Scalar(ScalarValue::Float64(Some(1.0))),
-                ColumnarValue::Scalar(ScalarValue::Utf8(Some(
-                    "endcap=square join=bevel".to_string(),
-                ))),
-            ])
+        let buffer_result_low_segs = tester
+            .invoke_scalar_scalar_scalar(
+                input_wkt,
+                buffer_dist,
+                "quad_segs=1 endcap=round".to_string(),
+            )
             .unwrap();
-
-        assert!(matches!(buffer_result2, ColumnarValue::Scalar(_)));
+        let envelope_result_low_segs = envelope_tester
+            .invoke_scalar(buffer_result_low_segs)
+            .unwrap();
+        tester.assert_scalar_result_equals(envelope_result_low_segs, expected_envelope);
     }
 }

@@ -44,7 +44,7 @@ pub fn scalar_kernels() -> Vec<(&'static str, ScalarKernelRef)> {
     vec![
         ("st_area", st_area_impl()),
         ("st_buffer", st_buffer_impl()),
-        ("st_buffer_style", st_buffer_style_impl()),
+        ("st_buffer", st_buffer_style_impl()),
         ("st_centroid", st_centroid_impl()),
         ("st_contains", st_contains_impl()),
         ("st_convexhull", st_convex_hull_impl()),
