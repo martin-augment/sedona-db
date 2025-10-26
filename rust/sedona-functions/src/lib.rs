@@ -49,6 +49,7 @@ mod st_point;
 mod st_pointzm;
 mod st_setsrid;
 mod st_srid;
+mod st_start_point;
 mod st_transform;
 pub mod st_union_aggr;
 mod st_xyzm;
