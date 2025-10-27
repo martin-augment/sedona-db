@@ -19,13 +19,17 @@ use datafusion_common::error::Result;
 use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
+use geo_traits::{CoordTrait, GeometryTrait, LineStringTrait};
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
-use sedona_geometry::wkb_factory::WKB_MIN_PROBABLE_BYTES;
+use sedona_geometry::{
+    error::SedonaGeometryError,
+    wkb_factory::{write_wkb_coord, write_wkb_point_header, WKB_MIN_PROBABLE_BYTES},
+};
 use sedona_schema::{
     datatypes::{SedonaType, WKB_GEOMETRY},
     matchers::ArgMatcher,
 };
-use std::sync::Arc;
+use std::{io::Write, sync::Arc};
 
 use crate::executor::WkbExecutor;
 
@@ -104,68 +108,63 @@ impl SedonaScalarKernel for STStartOrEndPoint {
             WKB_MIN_PROBABLE_BYTES * executor.num_iterations(),
         );
 
-        // Temporary buffer for WKB
-        let mut item = [0u8; 37]; // 37 = 1 for byte order, 4 for type, 32 for coordinates (XYZM)
-        item[0] = 0x01; // byte order
-
         executor.execute_wkb_void(|maybe_wkb| {
-            match maybe_wkb {
-                Some(wkb) => {
-                    let buf = wkb.buf();
-                    let n_bytes = match (buf[1], buf[2]) {
-                        // XY
-                        // 0002 (0x00000002) = LINESTRING
-                        // 0001 (0x00000001) = POINT
-                        (0x02, 0x00) => {
-                            item[1] = 0x01;
-                            16
-                        }
-                        // XYZ
-                        // 1002 (0x000003ea) = LINESTRING Z
-                        // 1001 (0x000003e9) = POINT Z
-                        (0xea, 0x03) => {
-                            item[1] = 0xe9;
-                            item[2] = 0x03;
-                            24
-                        }
-                        // XYM
-                        // 2002 (0x000007d2) = LINESTRING Z
-                        // 2001 (0x000007d1) = POINT Z
-                        (0xd2, 0x07) => {
-                            item[1] = 0xd1;
-                            item[2] = 0x07;
-                            24
-                        }
-                        // XYZM
-                        // 3002 (0x00000bba) = LINESTRING ZM
-                        // 3001 (0x00000bb9) = POINT ZM
-                        (0xba, 0x0b) => {
-                            item[1] = 0xb9;
-                            item[2] = 0x0b;
-                            32
-                        }
-                        _ => {
-                            builder.append_null();
-                            return Ok(());
-                        }
-                    };
-                    let dst_offset = 5;
-                    let src_offset = if self.from_start {
-                        9
+            if let Some(wkb) = maybe_wkb {
+                if let geo_traits::GeometryType::LineString(line_string) = wkb.as_type() {
+                    let maybe_coord = if self.from_start {
+                        line_string.coord(0)
                     } else {
-                        buf.len() - n_bytes
+                        line_string.coord(line_string.num_coords() - 1)
                     };
-                    item[dst_offset..(dst_offset + n_bytes)]
-                        .copy_from_slice(&buf[src_offset..(src_offset + n_bytes)]);
-                    builder.append_value(&item[0..(dst_offset + n_bytes)]);
+
+                    if let Some(coord) = maybe_coord {
+                        write_wkb_start_point(&mut builder, coord).map_err(|_| {
+                            datafusion_common::DataFusionError::Internal(
+                                "Failed to write WKB point header".to_string(),
+                            )
+                        })?;
+                        builder.append_value([]);
+                        return Ok(());
+                    }
                 }
-                None => builder.append_null(),
             }
 
+            builder.append_null();
             Ok(())
         })?;
 
         executor.finish(Arc::new(builder.finish()))
+    }
+}
+
+fn write_wkb_start_point(
+    buf: &mut impl Write,
+    coords: impl CoordTrait<T = f64>,
+) -> Result<(), SedonaGeometryError> {
+    let dim = coords.dim();
+    write_wkb_point_header(buf, dim)?;
+
+    match dim.size() {
+        2 => {
+            let coords_tuple = coords.x_y();
+            write_wkb_coord(buf, coords_tuple)
+        }
+        3 => {
+            let coords_tuple = (coords.x(), coords.y(), coords.nth_or_panic(2));
+            write_wkb_coord(buf, coords_tuple)
+        }
+        4 => {
+            let coords_tuple = (
+                coords.x(),
+                coords.y(),
+                coords.nth_or_panic(2),
+                coords.nth_or_panic(3),
+            );
+            write_wkb_coord(buf, coords_tuple)
+        }
+        _ => Err(SedonaGeometryError::Invalid(
+            "Unsupported number of dimensions".to_string(),
+        )),
     }
 }
 
