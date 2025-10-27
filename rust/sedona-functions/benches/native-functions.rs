@@ -126,6 +126,22 @@ fn criterion_benchmark(c: &mut Criterion) {
         ),
     );
 
+    benchmark::scalar(
+        c,
+        &f,
+        "native",
+        "st_start_point",
+        BenchmarkArgs::Array(LineString(10)),
+    );
+
+    benchmark::scalar(
+        c,
+        &f,
+        "native",
+        "st_end_point",
+        BenchmarkArgs::Array(LineString(10)),
+    );
+
     benchmark::scalar(c, &f, "native", "st_x", Point);
     benchmark::scalar(c, &f, "native", "st_y", Point);
     benchmark::scalar(c, &f, "native", "st_z", Point);
