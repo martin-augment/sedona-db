@@ -1031,7 +1031,7 @@ def test_st_pointm(eng, x, y, m, expected):
 def test_st_start_point(eng, geometry, expected):
     eng = eng.create_or_skip()
     eng.assert_query_result(
-        f"SELECT ST_StartPoint({val_or_null(geometry)})",
+        f"SELECT ST_StartPoint({geom_or_null(geometry)})",
         expected,
     )
 
@@ -1051,7 +1051,7 @@ def test_st_start_point(eng, geometry, expected):
 def test_st_end_point(eng, geometry, expected):
     eng = eng.create_or_skip()
     eng.assert_query_result(
-        f"SELECT ST_EndPoint({val_or_null(geometry)})",
+        f"SELECT ST_EndPoint({geom_or_null(geometry)})",
         expected,
     )
 
