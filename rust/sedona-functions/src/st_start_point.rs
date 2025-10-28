@@ -24,7 +24,9 @@ use sedona_common::sedona_internal_err;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
 use sedona_geometry::{
     error::SedonaGeometryError,
-    wkb_factory::{write_wkb_coord, write_wkb_point_header, WKB_MIN_PROBABLE_BYTES},
+    wkb_factory::{
+        write_wkb_coord, write_wkb_coord_trait, write_wkb_point_header, WKB_MIN_PROBABLE_BYTES,
+    },
 };
 use sedona_schema::{
     datatypes::{SedonaType, WKB_GEOMETRY},
@@ -138,33 +140,10 @@ impl SedonaScalarKernel for STStartOrEndPoint {
 
 fn write_wkb_start_point(
     buf: &mut impl Write,
-    coords: impl CoordTrait<T = f64>,
+    coord: impl CoordTrait<T = f64>,
 ) -> Result<(), SedonaGeometryError> {
-    let dim = coords.dim();
-    write_wkb_point_header(buf, dim)?;
-
-    match dim.size() {
-        2 => {
-            let coords_tuple = coords.x_y();
-            write_wkb_coord(buf, coords_tuple)
-        }
-        3 => {
-            let coords_tuple = (coords.x(), coords.y(), coords.nth_or_panic(2));
-            write_wkb_coord(buf, coords_tuple)
-        }
-        4 => {
-            let coords_tuple = (
-                coords.x(),
-                coords.y(),
-                coords.nth_or_panic(2),
-                coords.nth_or_panic(3),
-            );
-            write_wkb_coord(buf, coords_tuple)
-        }
-        _ => Err(SedonaGeometryError::Invalid(
-            "Unsupported number of dimensions".to_string(),
-        )),
-    }
+    write_wkb_point_header(buf, coord.dim())?;
+    write_wkb_coord_trait(buf, &coord)
 }
 
 #[cfg(test)]
