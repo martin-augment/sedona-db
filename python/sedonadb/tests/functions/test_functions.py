@@ -1025,7 +1025,7 @@ def test_st_pointm(eng, x, y, m, expected):
         ("LINESTRING ZM (1 2 3 4, 3 4 5 6, 5 6 7 8)", "POINT ZM (1 2 3 4)"),
         ("POINT (1 2)",                               None                ),
         ("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",   None                ),
-        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))",  None                ),                ),
+        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))",  None                ),
     ],
 )
 def test_st_start_point(eng, geometry, expected):

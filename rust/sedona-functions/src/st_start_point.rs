@@ -119,9 +119,8 @@ impl SedonaScalarKernel for STStartOrEndPoint {
 
                     if let Some(coord) = maybe_coord {
                         write_wkb_start_point(&mut builder, coord).map_err(|_| {
-                            datafusion_common::DataFusionError::Internal(
-                                "Failed to write WKB point header".to_string(),
-                            )
+                            sedona_internal_err!("Failed to write WKB point header")
+
                         })?;
                         builder.append_value([]);
                         return Ok(());
