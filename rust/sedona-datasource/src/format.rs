@@ -49,9 +49,12 @@ use object_store::{ObjectMeta, ObjectStore};
 use sedona_common::sedona_internal_err;
 
 #[async_trait]
-pub trait SimpleFileFormat: Debug + Send + Sync {
+pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
     fn extension(&self) -> &str;
-    fn with_options(&self, options: &HashMap<String, String>) -> Result<Arc<dyn SimpleFileFormat>>;
+    fn with_options(
+        &self,
+        options: &HashMap<String, String>,
+    ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>>;
     async fn infer_schema(&self, location: &Object) -> Result<Schema>;
     async fn infer_stats(&self, _location: &Object, table_schema: &Schema) -> Result<Statistics> {
         Ok(Statistics::new_unknown(table_schema))
@@ -100,29 +103,29 @@ impl Display for Object {
 }
 
 #[derive(Debug)]
-pub struct SedonaFormatFactory {
-    spec: Arc<dyn SimpleFileFormat>,
+pub struct RecordBatchReaderFormatFactory {
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
 }
 
-impl SedonaFormatFactory {
-    pub fn new(spec: Arc<dyn SimpleFileFormat>) -> Self {
+impl RecordBatchReaderFormatFactory {
+    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
         Self { spec }
     }
 }
 
-impl FileFormatFactory for SedonaFormatFactory {
+impl FileFormatFactory for RecordBatchReaderFormatFactory {
     fn create(
         &self,
         _state: &dyn Session,
         format_options: &HashMap<String, String>,
     ) -> Result<Arc<dyn FileFormat>> {
-        Ok(Arc::new(SedonaFormat {
+        Ok(Arc::new(RecordBatchReaderFormat {
             spec: self.spec.with_options(format_options)?,
         }))
     }
 
     fn default(&self) -> Arc<dyn FileFormat> {
-        Arc::new(SedonaFormat {
+        Arc::new(RecordBatchReaderFormat {
             spec: self.spec.clone(),
         })
     }
@@ -132,19 +135,19 @@ impl FileFormatFactory for SedonaFormatFactory {
     }
 }
 
-impl GetExt for SedonaFormatFactory {
+impl GetExt for RecordBatchReaderFormatFactory {
     fn get_ext(&self) -> String {
         self.spec.extension().to_string()
     }
 }
 
 #[derive(Debug)]
-pub struct SedonaFormat {
-    spec: Arc<dyn SimpleFileFormat>,
+struct RecordBatchReaderFormat {
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
 }
 
 #[async_trait]
-impl FileFormat for SedonaFormat {
+impl FileFormat for RecordBatchReaderFormat {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -234,7 +237,7 @@ impl FileFormat for SedonaFormat {
 
 #[derive(Debug, Clone)]
 struct SedonaFileSource {
-    spec: Arc<dyn SimpleFileFormat>,
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
     batch_size: Option<usize>,
     file_schema: Option<SchemaRef>,
     file_projection: Option<Vec<usize>>,
@@ -244,7 +247,7 @@ struct SedonaFileSource {
 }
 
 impl SedonaFileSource {
-    pub fn new(spec: Arc<dyn SimpleFileFormat>) -> Self {
+    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
         Self {
             spec,
             batch_size: None,
@@ -358,7 +361,7 @@ impl FileSource for SedonaFileSource {
 
 #[derive(Debug, Clone)]
 struct SimpleOpener {
-    spec: Arc<dyn SimpleFileFormat>,
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
     args: OpenReaderArgs,
     partition: usize,
 }
