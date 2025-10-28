@@ -203,3 +203,39 @@ class TestBenchFunctions(TestBenchBase):
             eng.execute_and_collect(f"SELECT ST_Perimeter(geom1) from {table}")
 
         benchmark(queries)
+
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
+    @pytest.mark.parametrize(
+        "table",
+        [
+            "collections_simple",
+            "segments_large",
+        ],
+    )
+    def test_st_start_point(self, benchmark, eng, table):
+        eng = self._get_eng(eng)
+
+        def queries():
+            eng.execute_and_collect(f"SELECT ST_StartPoint(geom1) from {table}")
+
+        benchmark(queries)
+
+    @pytest.mark.parametrize(
+        "eng", [SedonaDBSingleThread, PostGISSingleThread, DuckDBSingleThread]
+    )
+    @pytest.mark.parametrize(
+        "table",
+        [
+            "collections_simple",
+            "segments_large",
+        ],
+    )
+    def test_st_end_point(self, benchmark, eng, table):
+        eng = self._get_eng(eng)
+
+        def queries():
+            eng.execute_and_collect(f"SELECT ST_EndPoint(geom1) from {table}")
+
+        benchmark(queries)
