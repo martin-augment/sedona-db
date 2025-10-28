@@ -130,7 +130,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         c,
         &f,
         "native",
-        "st_start_point",
+        "st_startpoint",
         BenchmarkArgs::Array(LineString(10)),
     );
 
@@ -138,7 +138,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         c,
         &f,
         "native",
-        "st_end_point",
+        "st_endpoint",
         BenchmarkArgs::Array(LineString(10)),
     );
 

@@ -20,6 +20,7 @@ use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
 use geo_traits::{CoordTrait, GeometryTrait, LineStringTrait};
+use sedona_common::sedona_internal_err;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
 use sedona_geometry::{
     error::SedonaGeometryError,
@@ -38,7 +39,7 @@ use crate::executor::WkbExecutor;
 /// Native implementation to get the start point of a geometry
 pub fn st_start_point_udf() -> SedonaScalarUDF {
     SedonaScalarUDF::new(
-        "st_start_point",
+        "st_startpoint",
         vec![Arc::new(STStartOrEndPoint::new(true))],
         Volatility::Immutable,
         Some(st_start_point_doc()),
@@ -61,7 +62,7 @@ fn st_start_point_doc() -> Documentation {
 /// Native implementation to get the end point of a geometry
 pub fn st_end_point_udf() -> SedonaScalarUDF {
     SedonaScalarUDF::new(
-        "st_end_point",
+        "st_endpoint",
         vec![Arc::new(STStartOrEndPoint::new(false))],
         Volatility::Immutable,
         Some(st_end_point_doc()),
@@ -118,10 +119,9 @@ impl SedonaScalarKernel for STStartOrEndPoint {
                     };
 
                     if let Some(coord) = maybe_coord {
-                        write_wkb_start_point(&mut builder, coord).map_err(|_| {
-                            sedona_internal_err!("Failed to write WKB point header")
-
-                        })?;
+                        if write_wkb_start_point(&mut builder, coord).is_err() {
+                            return sedona_internal_err!("Failed to write WKB point header");
+                        };
                         builder.append_value([]);
                         return Ok(());
                     }
@@ -181,11 +181,11 @@ mod tests {
     #[test]
     fn udf_metadata() {
         let st_start_point_udf: ScalarUDF = st_start_point_udf().into();
-        assert_eq!(st_start_point_udf.name(), "st_start_point");
+        assert_eq!(st_start_point_udf.name(), "st_startpoint");
         assert!(st_start_point_udf.documentation().is_some());
 
         let st_end_point_udf: ScalarUDF = st_end_point_udf().into();
-        assert_eq!(st_end_point_udf.name(), "st_end_point");
+        assert_eq!(st_end_point_udf.name(), "st_endpoint");
         assert!(st_end_point_udf.documentation().is_some());
     }
 
