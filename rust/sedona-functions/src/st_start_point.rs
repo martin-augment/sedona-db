@@ -19,14 +19,15 @@ use datafusion_common::error::Result;
 use datafusion_expr::{
     scalar_doc_sections::DOC_SECTION_OTHER, ColumnarValue, Documentation, Volatility,
 };
-use geo_traits::{CoordTrait, GeometryTrait, LineStringTrait};
+use geo_traits::{
+    CoordTrait, GeometryCollectionTrait, GeometryTrait, LineStringTrait, MultiLineStringTrait,
+    MultiPointTrait, MultiPolygonTrait, PointTrait, PolygonTrait,
+};
 use sedona_common::sedona_internal_err;
 use sedona_expr::scalar_udf::{SedonaScalarKernel, SedonaScalarUDF};
 use sedona_geometry::{
     error::SedonaGeometryError,
-    wkb_factory::{
-        write_wkb_coord, write_wkb_coord_trait, write_wkb_point_header, WKB_MIN_PROBABLE_BYTES,
-    },
+    wkb_factory::{write_wkb_coord_trait, write_wkb_point_header, WKB_MIN_PROBABLE_BYTES},
 };
 use sedona_schema::{
     datatypes::{SedonaType, WKB_GEOMETRY},
@@ -113,20 +114,12 @@ impl SedonaScalarKernel for STStartOrEndPoint {
 
         executor.execute_wkb_void(|maybe_wkb| {
             if let Some(wkb) = maybe_wkb {
-                if let geo_traits::GeometryType::LineString(line_string) = wkb.as_type() {
-                    let maybe_coord = if self.from_start {
-                        line_string.coord(0)
-                    } else {
-                        line_string.coord(line_string.num_coords() - 1)
+                if let Some(coord) = extract_first_geometry(&wkb, self.from_start) {
+                    if write_wkb_start_point(&mut builder, coord).is_err() {
+                        return sedona_internal_err!("Failed to write WKB point header");
                     };
-
-                    if let Some(coord) = maybe_coord {
-                        if write_wkb_start_point(&mut builder, coord).is_err() {
-                            return sedona_internal_err!("Failed to write WKB point header");
-                        };
-                        builder.append_value([]);
-                        return Ok(());
-                    }
+                    builder.append_value([]);
+                    return Ok(());
                 }
             }
 
@@ -144,6 +137,54 @@ fn write_wkb_start_point(
 ) -> Result<(), SedonaGeometryError> {
     write_wkb_point_header(buf, coord.dim())?;
     write_wkb_coord_trait(buf, &coord)
+}
+
+// - ST_StartPoint returns result for all types of geometries
+// - ST_EndPoint returns result only for LINESTRING
+fn extract_first_geometry<'a>(
+    wkb: &'a wkb::reader::Wkb<'a>,
+    from_start: bool,
+) -> Option<wkb::reader::Coord<'a>> {
+    match (wkb.as_type(), from_start) {
+        (geo_traits::GeometryType::Point(point), true) => point.coord(),
+        (geo_traits::GeometryType::LineString(line_string), true) => line_string.coord(0),
+        (geo_traits::GeometryType::LineString(line_string), false) => {
+            line_string.coord(line_string.num_coords() - 1)
+        }
+        (geo_traits::GeometryType::Polygon(polygon), true) => match polygon.exterior() {
+            Some(ring) => ring.coord(0),
+            None => None,
+        },
+        (geo_traits::GeometryType::MultiPoint(multi_point), true) => match multi_point.point(0) {
+            Some(point) => point.coord(),
+            None => None,
+        },
+        (geo_traits::GeometryType::MultiLineString(multi_line_string), true) => {
+            match multi_line_string.line_string(0) {
+                Some(line_string) => line_string.coord(0),
+                None => None,
+            }
+        }
+        (geo_traits::GeometryType::MultiPolygon(multi_polygon), true) => {
+            match multi_polygon.polygon(0) {
+                Some(polygon) => match polygon.exterior() {
+                    Some(ring) => ring.coord(0),
+                    None => None,
+                },
+                None => None,
+            }
+        }
+        (geo_traits::GeometryType::GeometryCollection(geometry_collection), true) => {
+            match geometry_collection.geometry(0) {
+                Some(geometry) => extract_first_geometry(geometry, from_start),
+                None => None,
+            }
+        }
+        (geo_traits::GeometryType::Rect(_), true) => None,
+        (geo_traits::GeometryType::Triangle(_), true) => None,
+        (geo_traits::GeometryType::Line(_), true) => None,
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -183,7 +224,10 @@ mod tests {
                 Some("LINESTRING ZM (1 2 3 4, 3 4 5 6, 5 6 7 8)"),
                 Some("POINT (1 2)"),
                 Some("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"),
+                Some("MULTIPOINT (0 0, 10 0, 10 10, 0 10, 0 0)"),
                 Some("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))"),
+                Some("MULTIPOLYGON (((0 0, 10 0, 10 10, 0 10, 0 0)))"),
+                Some("GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (3 4, 5 6))"),
                 None,
             ],
             &sedona_type,
@@ -195,9 +239,12 @@ mod tests {
                 Some("POINT Z (1 2 3)"),
                 Some("POINT M (1 2 3)"),
                 Some("POINT ZM (1 2 3 4)"),
-                None,
-                None,
-                None,
+                Some("POINT (1 2)"),
+                Some("POINT (0 0)"),
+                Some("POINT (0 0)"),
+                Some("POINT (1 2)"),
+                Some("POINT (0 0)"),
+                Some("POINT (1 2)"),
                 None,
             ],
             &WKB_GEOMETRY,
@@ -212,6 +259,9 @@ mod tests {
                 Some("POINT Z (5 6 7)"),
                 Some("POINT M (5 6 7)"),
                 Some("POINT ZM (5 6 7 8)"),
+                None,
+                None,
+                None,
                 None,
                 None,
                 None,

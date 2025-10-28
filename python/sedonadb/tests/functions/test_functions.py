@@ -1015,17 +1015,25 @@ def test_st_pointm(eng, x, y, m, expected):
         expected,
     )
 
+
 @pytest.mark.parametrize("eng", [SedonaDB, PostGIS])
 @pytest.mark.parametrize(
     ("geometry", "expected"),
     [
-        ("LINESTRING (1 2, 3 4, 5 6)",                "POINT (1 2)"       ),
-        ("LINESTRING Z (1 2 3, 3 4 5, 5 6 7)",        "POINT Z (1 2 3)"   ),
-        ("LINESTRING M (1 2 3, 3 4 5, 5 6 7)",        "POINT M (1 2 3)"   ),
+        ("LINESTRING (1 2, 3 4, 5 6)", "POINT (1 2)"),
+        ("LINESTRING Z (1 2 3, 3 4 5, 5 6 7)", "POINT Z (1 2 3)"),
+        ("LINESTRING M (1 2 3, 3 4 5, 5 6 7)", "POINT M (1 2 3)"),
         ("LINESTRING ZM (1 2 3 4, 3 4 5 6, 5 6 7 8)", "POINT ZM (1 2 3 4)"),
-        ("POINT (1 2)",                               None                ),
-        ("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",   None                ),
-        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))",  None                ),
+        ("POINT (1 2)", "POINT (1 2)"),
+        ("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))", "POINT (0 0)"),
+        ("MULTIPOINT (0 0, 10 0, 10 10, 0 10, 0 0)", "POINT (0 0)"),
+        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))", "POINT (1 2)"),
+        ("MULTIPOLYGON (((0 0, 10 0, 10 10, 0 10, 0 0)))", "POINT (0 0)"),
+        ("GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (3 4, 5 6))", "POINT (1 2)"),
+        (
+            "GEOMETRYCOLLECTION (GEOMETRYCOLLECTION (GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (3 4, 5 6))))",
+            "POINT (1 2)",
+        ),
     ],
 )
 def test_st_start_point(eng, geometry, expected):
@@ -1035,17 +1043,18 @@ def test_st_start_point(eng, geometry, expected):
         expected,
     )
 
+
 @pytest.mark.parametrize("eng", [SedonaDB, PostGIS])
 @pytest.mark.parametrize(
     ("geometry", "expected"),
     [
-        ("LINESTRING (1 2, 3 4, 5 6)",                "POINT (5 6)"       ),
-        ("LINESTRING Z (1 2 3, 3 4 5, 5 6 7)",        "POINT Z (5 6 7)"   ),
-        ("LINESTRING M (1 2 3, 3 4 5, 5 6 7)",        "POINT M (5 6 7)"   ),
+        ("LINESTRING (1 2, 3 4, 5 6)", "POINT (5 6)"),
+        ("LINESTRING Z (1 2 3, 3 4 5, 5 6 7)", "POINT Z (5 6 7)"),
+        ("LINESTRING M (1 2 3, 3 4 5, 5 6 7)", "POINT M (5 6 7)"),
         ("LINESTRING ZM (1 2 3 4, 3 4 5 6, 5 6 7 8)", "POINT ZM (5 6 7 8)"),
-        ("POINT (1 2)",                               None                ),
-        ("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",   None                ),
-        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))",  None                ),
+        ("POINT (1 2)", None),
+        ("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))", None),
+        ("MULTILINESTRING ((1 2, 3 4), (5 6, 7 8))", None),
     ],
 )
 def test_st_end_point(eng, geometry, expected):
@@ -1054,6 +1063,7 @@ def test_st_end_point(eng, geometry, expected):
         f"SELECT ST_EndPoint({geom_or_null(geometry)})",
         expected,
     )
+
 
 @pytest.mark.parametrize("eng", [SedonaDB, PostGIS])
 @pytest.mark.parametrize(
