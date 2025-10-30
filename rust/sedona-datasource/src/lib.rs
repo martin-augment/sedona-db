@@ -16,4 +16,5 @@
 // under the License.
 
 pub mod format;
+pub mod provider;
 pub mod spec;

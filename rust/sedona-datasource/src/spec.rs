@@ -21,6 +21,7 @@ use arrow_array::RecordBatchReader;
 use arrow_schema::{Schema, SchemaRef};
 use async_trait::async_trait;
 
+use datafusion::config::TableOptions;
 use datafusion_common::{Result, Statistics};
 use datafusion_execution::object_store::ObjectStoreUrl;
 use datafusion_physical_expr::PhysicalExpr;
@@ -33,6 +34,10 @@ pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
         &self,
         options: &HashMap<String, String>,
     ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>>;
+    fn with_table_options(
+        &self,
+        table_options: &TableOptions,
+    ) -> Arc<dyn RecordBatchReaderFormatSpec>;
     async fn infer_schema(&self, location: &Object) -> Result<Schema>;
     async fn infer_stats(&self, _location: &Object, table_schema: &Schema) -> Result<Statistics> {
         Ok(Statistics::new_unknown(table_schema))

@@ -83,8 +83,14 @@ impl GetExt for RecordBatchReaderFormatFactory {
 }
 
 #[derive(Debug)]
-struct RecordBatchReaderFormat {
+pub struct RecordBatchReaderFormat {
     spec: Arc<dyn RecordBatchReaderFormatSpec>,
+}
+
+impl RecordBatchReaderFormat {
+    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
+        Self { spec }
+    }
 }
 
 #[async_trait]
@@ -343,7 +349,9 @@ mod test {
         Int32Array, Int64Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray,
     };
     use arrow_schema::{DataType, Field};
-    use datafusion::{execution::SessionStateBuilder, prelude::SessionContext};
+    use datafusion::{
+        config::TableOptions, execution::SessionStateBuilder, prelude::SessionContext,
+    };
     use datafusion_common::plan_err;
     use std::io::Write;
     use tempfile::TempDir;
@@ -375,6 +383,13 @@ mod test {
             }
 
             Ok(Arc::new(self_clone))
+        }
+
+        fn with_table_options(
+            &self,
+            _table_options: &TableOptions,
+        ) -> Arc<dyn RecordBatchReaderFormatSpec> {
+            Arc::new(self.clone())
         }
 
         async fn infer_schema(&self, _location: &Object) -> Result<Schema> {
