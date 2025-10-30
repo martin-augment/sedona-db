@@ -15,12 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{
-    any::Any,
-    collections::HashMap,
-    fmt::{Debug, Display},
-    sync::Arc,
-};
+use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 
 use arrow_array::RecordBatchReader;
 use arrow_schema::{Schema, SchemaRef};
@@ -73,31 +68,33 @@ pub struct OpenReaderArgs {
 }
 
 #[derive(Debug, Clone)]
-pub enum Object {
-    ObjectStoreUrl(Arc<dyn ObjectStore>, ObjectStoreUrl),
-    ObjetctStoreMeta(Arc<dyn ObjectStore>, ObjectMeta),
-    String(String),
+pub struct Object {
+    store: Arc<dyn ObjectStore>,
+    url: Option<ObjectStoreUrl>,
+    meta: Option<ObjectMeta>,
 }
 
-impl Display for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Object::ObjectStoreUrl(_, object_store_url) => write!(f, "{object_store_url}"),
-            Object::ObjetctStoreMeta(object_store, object_meta) => {
-                // There's no great way to map an object_store to a url prefix.
+impl Object {
+    pub fn to_url_string(&self) -> String {
+        match (&self.url, &self.meta) {
+            (None, None) => format!("{:?}", self.store),
+            (None, Some(meta)) => {
+                // There's no great way to map an object_store to a url prefix if we're not
+                // provided the `url`; however, this is what we have access to on occasion.
                 // This is a heuristic that should work for https and a local filesystem,
                 // which is what we might be able to expect a non-DataFusion system like
                 // GDAL to be able to translate.
-                let object_store_debug = format!("{object_store:?}").to_lowercase();
+                let object_store_debug = format!("{:?}", self.store).to_lowercase();
                 if object_store_debug.contains("http") {
-                    write!(f, "https://{}", object_meta.location)
+                    format!("https://{}", meta.location)
                 } else if object_store_debug.contains("local") {
-                    write!(f, "file://{}", object_meta.location)
+                    format!("file://{}", meta.location)
                 } else {
-                    write!(f, "{object_store_debug}: {}", object_meta.location)
+                    format!("{object_store_debug}: {}", meta.location)
                 }
             }
-            Object::String(item) => write!(f, "{item}"),
+            (Some(url), None) => url.to_string(),
+            (Some(url), Some(meta)) => format!("{url}/{}", meta.location),
         }
     }
 }
@@ -177,7 +174,11 @@ impl FileFormat for RecordBatchReaderFormat {
             .map(|object| async move {
                 let schema = self
                     .spec
-                    .infer_schema(&Object::ObjetctStoreMeta(store.clone(), object.clone()))
+                    .infer_schema(&Object {
+                        store: store.clone(),
+                        url: None,
+                        meta: Some(object.clone()),
+                    })
                     .await?;
                 Ok::<_, DataFusionError>((object.location.clone(), schema))
             })
@@ -206,7 +207,11 @@ impl FileFormat for RecordBatchReaderFormat {
     ) -> Result<Statistics> {
         self.spec
             .infer_stats(
-                &Object::ObjetctStoreMeta(store.clone(), object.clone()),
+                &Object {
+                    store: store.clone(),
+                    url: None,
+                    meta: Some(object.clone()),
+                },
                 &table_schema,
             )
             .await
@@ -268,7 +273,11 @@ impl FileSource for SedonaFileSource {
         partition: usize,
     ) -> Arc<dyn FileOpener> {
         let args = OpenReaderArgs {
-            src: Object::ObjectStoreUrl(store.clone(), base_config.object_store_url.clone()),
+            src: Object {
+                store: store.clone(),
+                url: Some(base_config.object_store_url.clone()),
+                meta: None,
+            },
             batch_size: self.batch_size,
             file_schema: self.file_schema.clone(),
             file_projection: self.file_projection.clone(),
@@ -367,13 +376,14 @@ struct SimpleOpener {
 }
 
 impl FileOpener for SimpleOpener {
-    fn open(&self, _file_meta: FileMeta, _file: PartitionedFile) -> Result<FileOpenFuture> {
+    fn open(&self, file_meta: FileMeta, _file: PartitionedFile) -> Result<FileOpenFuture> {
         if self.partition != 0 {
             return sedona_internal_err!("Expected SimpleOpener to open a single partition");
         }
 
-        let self_clone = self.clone();
+        let mut self_clone = self.clone();
         Ok(Box::pin(async move {
+            self_clone.args.src.meta.replace(file_meta.object_meta);
             let reader = self_clone.spec.open_reader(&self_clone.args).await?;
             let stream =
                 futures::stream::iter(reader.into_iter().map(|batch| batch.map_err(Into::into)));
@@ -387,8 +397,9 @@ mod test {
 
     use arrow_array::{Int32Array, Int64Array, RecordBatch, RecordBatchIterator, StringArray};
     use arrow_schema::{DataType, Field};
-    use datafusion::{assert_batches_eq, execution::SessionStateBuilder, prelude::SessionContext};
+    use datafusion::{execution::SessionStateBuilder, prelude::SessionContext};
     use datafusion_common::plan_err;
+    use std::io::Write;
     use tempfile::TempDir;
 
     use super::*;
@@ -443,7 +454,7 @@ mod test {
         ) -> Result<Box<dyn RecordBatchReader + Send>> {
             let src: StringArray = [args.src.clone()]
                 .iter()
-                .map(|item| Some(item.to_string()))
+                .map(|item| Some(item.to_url_string()))
                 .collect();
             let batch_size: Int64Array = [args.batch_size]
                 .iter()
@@ -481,9 +492,15 @@ mod test {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
         let file0 = temp_path.join("item0.echospec");
-        std::fs::File::create(&file0).unwrap();
+        std::fs::File::create(&file0)
+            .unwrap()
+            .write_all(b"not empty")
+            .unwrap();
         let file1 = temp_path.join("item1.echospec");
-        std::fs::File::create(&file1).unwrap();
+        std::fs::File::create(&file1)
+            .unwrap()
+            .write_all(b"not empty")
+            .unwrap();
 
         let mut state = SessionStateBuilder::new().build();
         state.register_file_format(Arc::new(factory), true).unwrap();
@@ -497,6 +514,7 @@ mod test {
             .await
             .unwrap();
 
-        assert_batches_eq!([""], &batches_item0);
+        assert_eq!(batches_item0.len(), 1);
+        assert_eq!(batches_item0[0].num_rows(), 1);
     }
 }
