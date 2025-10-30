@@ -381,3 +381,122 @@ impl FileOpener for SimpleOpener {
         }))
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use arrow_array::{Int32Array, Int64Array, RecordBatch, RecordBatchIterator, StringArray};
+    use arrow_schema::{DataType, Field};
+    use datafusion::{assert_batches_eq, execution::SessionStateBuilder, prelude::SessionContext};
+    use datafusion_common::plan_err;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[derive(Debug, Default, Clone)]
+    struct EchoSpec {
+        option_value: Option<String>,
+    }
+
+    #[async_trait]
+    impl RecordBatchReaderFormatSpec for EchoSpec {
+        fn extension(&self) -> &str {
+            "echospec"
+        }
+
+        fn with_options(
+            &self,
+            options: &HashMap<String, String>,
+        ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>> {
+            let mut self_clone = self.clone();
+            for (k, v) in options {
+                if k == "option_value" {
+                    self_clone.option_value = Some(v.to_string());
+                } else {
+                    return plan_err!("Unsupported option for EchoSpec: '{k}'");
+                }
+            }
+
+            Ok(Arc::new(self_clone))
+        }
+
+        async fn infer_schema(&self, _location: &Object) -> Result<Schema> {
+            Ok(Schema::new(vec![
+                Field::new("src", DataType::Utf8, true),
+                Field::new("batch_size", DataType::Int64, true),
+                Field::new("filter_count", DataType::Int32, true),
+                Field::new("option_value", DataType::Utf8, true),
+            ]))
+        }
+
+        async fn infer_stats(
+            &self,
+            _location: &Object,
+            table_schema: &Schema,
+        ) -> Result<Statistics> {
+            Ok(Statistics::new_unknown(table_schema))
+        }
+
+        async fn open_reader(
+            &self,
+            args: &OpenReaderArgs,
+        ) -> Result<Box<dyn RecordBatchReader + Send>> {
+            let src: StringArray = [args.src.clone()]
+                .iter()
+                .map(|item| Some(item.to_string()))
+                .collect();
+            let batch_size: Int64Array = [args.batch_size]
+                .iter()
+                .map(|item| item.map(|i| i as i64))
+                .collect();
+            let filter_count: Int32Array = [args.filters.clone().map(|f| f.len() as i32)]
+                .iter()
+                .collect();
+            let option_value: StringArray = [self.option_value.clone()].iter().collect();
+
+            let schema = Arc::new(self.infer_schema(&args.src).await?);
+            let mut batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(src),
+                    Arc::new(batch_size),
+                    Arc::new(filter_count),
+                    Arc::new(option_value),
+                ],
+            )?;
+
+            if let Some(projection) = &args.file_projection {
+                batch = batch.project(projection)?;
+            }
+
+            Ok(Box::new(RecordBatchIterator::new([Ok(batch)], schema)))
+        }
+    }
+
+    #[tokio::test]
+    async fn spec_format() {
+        let spec = Arc::new(EchoSpec::default());
+        let factory = RecordBatchReaderFormatFactory::new(spec);
+
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+        let file0 = temp_path.join("item0.echospec");
+        std::fs::File::create(&file0).unwrap();
+        let file1 = temp_path.join("item1.echospec");
+        std::fs::File::create(&file1).unwrap();
+
+        let mut state = SessionStateBuilder::new().build();
+        state.register_file_format(Arc::new(factory), true).unwrap();
+        let ctx = SessionContext::new_with_state(state).enable_url_table();
+
+        let batches_item0 = ctx
+            .table(file0.to_string_lossy().to_string())
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        assert_batches_eq!([""], &batches_item0);
+    }
+}
