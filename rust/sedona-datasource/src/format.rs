@@ -17,7 +17,6 @@
 
 use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 
-use arrow_array::RecordBatchReader;
 use arrow_schema::{Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::{
@@ -32,7 +31,6 @@ use datafusion::{
 };
 use datafusion_catalog::{memory::DataSourceExec, Session};
 use datafusion_common::{not_impl_err, DataFusionError, GetExt, Result, Statistics};
-use datafusion_execution::object_store::ObjectStoreUrl;
 use datafusion_physical_expr::{LexOrdering, LexRequirement, PhysicalExpr};
 use datafusion_physical_plan::{
     filter_pushdown::{FilterPushdownPropagation, PushedDown},
@@ -43,61 +41,7 @@ use futures::{StreamExt, TryStreamExt};
 use object_store::{ObjectMeta, ObjectStore};
 use sedona_common::sedona_internal_err;
 
-#[async_trait]
-pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
-    fn extension(&self) -> &str;
-    fn with_options(
-        &self,
-        options: &HashMap<String, String>,
-    ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>>;
-    async fn infer_schema(&self, location: &Object) -> Result<Schema>;
-    async fn infer_stats(&self, _location: &Object, table_schema: &Schema) -> Result<Statistics> {
-        Ok(Statistics::new_unknown(table_schema))
-    }
-    async fn open_reader(&self, args: &OpenReaderArgs)
-        -> Result<Box<dyn RecordBatchReader + Send>>;
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenReaderArgs {
-    pub src: Object,
-    pub batch_size: Option<usize>,
-    pub file_schema: Option<SchemaRef>,
-    pub file_projection: Option<Vec<usize>>,
-    pub filters: Option<Vec<Arc<dyn PhysicalExpr>>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Object {
-    store: Arc<dyn ObjectStore>,
-    url: Option<ObjectStoreUrl>,
-    meta: Option<ObjectMeta>,
-}
-
-impl Object {
-    pub fn to_url_string(&self) -> String {
-        match (&self.url, &self.meta) {
-            (None, None) => format!("{:?}", self.store),
-            (None, Some(meta)) => {
-                // There's no great way to map an object_store to a url prefix if we're not
-                // provided the `url`; however, this is what we have access to on occasion.
-                // This is a heuristic that should work for https and a local filesystem,
-                // which is what we might be able to expect a non-DataFusion system like
-                // GDAL to be able to translate.
-                let object_store_debug = format!("{:?}", self.store).to_lowercase();
-                if object_store_debug.contains("http") {
-                    format!("https://{}", meta.location)
-                } else if object_store_debug.contains("local") {
-                    format!("file://{}", meta.location)
-                } else {
-                    format!("{object_store_debug}: {}", meta.location)
-                }
-            }
-            (Some(url), None) => url.to_string(),
-            (Some(url), Some(meta)) => format!("{url}/{}", meta.location),
-        }
-    }
-}
+use crate::spec::{Object, OpenReaderArgs, RecordBatchReaderFormatSpec};
 
 #[derive(Debug)]
 pub struct RecordBatchReaderFormatFactory {
@@ -395,7 +339,9 @@ impl FileOpener for SimpleOpener {
 #[cfg(test)]
 mod test {
 
-    use arrow_array::{Int32Array, Int64Array, RecordBatch, RecordBatchIterator, StringArray};
+    use arrow_array::{
+        Int32Array, Int64Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray,
+    };
     use arrow_schema::{DataType, Field};
     use datafusion::{execution::SessionStateBuilder, prelude::SessionContext};
     use datafusion_common::plan_err;
