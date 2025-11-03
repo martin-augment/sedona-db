@@ -374,8 +374,11 @@ mod test {
     };
     use arrow_schema::{DataType, Field};
     use datafusion::{
-        config::TableOptions, datasource::listing::ListingTableUrl, execution::SessionStateBuilder,
-        prelude::SessionContext,
+        assert_batches_eq,
+        config::TableOptions,
+        datasource::listing::ListingTableUrl,
+        execution::SessionStateBuilder,
+        prelude::{col, lit, SessionContext},
     };
     use datafusion_common::plan_err;
     use std::{
@@ -551,6 +554,37 @@ mod test {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].num_rows(), 1);
         assert_eq!(batches[1].num_rows(), 1);
+    }
+
+    #[tokio::test]
+    async fn spec_format_project_filter() {
+        let ctx = create_echo_spec_ctx();
+        let (_temp_dir, files) = create_echo_spec_temp_dir();
+
+        // Ensure that if we pass
+        let batches = ctx
+            .table(files[0].to_string_lossy().to_string())
+            .await
+            .unwrap()
+            .filter(col("src").like(lit("%echospec")))
+            .unwrap()
+            .select(vec![col("batch_size"), col("filter_count")])
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        // We don't seem to be getting the filter here :(
+        assert_batches_eq!(
+            [
+                "+------------+--------------+",
+                "| batch_size | filter_count |",
+                "+------------+--------------+",
+                "| 8192       | 1            |",
+                "+------------+--------------+",
+            ],
+            &batches
+        );
     }
 
     #[tokio::test]

@@ -74,7 +74,6 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
     }
 }
 
-/// Create a [ListingTable] of GeoParquet (or normal Parquet) files
 pub async fn record_batch_reader_listing_table(
     context: &SessionContext,
     table_paths: Vec<ListingTableUrl>,
