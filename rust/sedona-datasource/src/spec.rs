@@ -76,7 +76,7 @@ impl Object {
                 if object_store_debug.contains("http") {
                     format!("https://{}", meta.location)
                 } else if object_store_debug.contains("local") {
-                    format!("file://{}", meta.location)
+                    format!("file:///{}", meta.location)
                 } else {
                     format!("{object_store_debug}: {}", meta.location)
                 }

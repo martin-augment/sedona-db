@@ -220,7 +220,7 @@ impl FileSource for SedonaFileSource {
         &self,
         store: Arc<dyn ObjectStore>,
         base_config: &FileScanConfig,
-        partition: usize,
+        _partition: usize,
     ) -> Arc<dyn FileOpener> {
         let args = OpenReaderArgs {
             src: Object {
@@ -237,7 +237,6 @@ impl FileSource for SedonaFileSource {
         Arc::new(SimpleOpener {
             spec: self.spec.clone(),
             args,
-            partition,
         })
     }
 
@@ -322,13 +321,14 @@ impl FileSource for SedonaFileSource {
 struct SimpleOpener {
     spec: Arc<dyn RecordBatchReaderFormatSpec>,
     args: OpenReaderArgs,
-    partition: usize,
 }
 
 impl FileOpener for SimpleOpener {
     fn open(&self, file_meta: FileMeta, _file: PartitionedFile) -> Result<FileOpenFuture> {
-        if self.partition != 0 {
-            return sedona_internal_err!("Expected SimpleOpener to open a single partition");
+        if file_meta.range.is_some() {
+            return sedona_internal_err!(
+                "Expected SimpleOpener to open a single partition per file"
+            );
         }
 
         let mut self_clone = self.clone();
@@ -350,13 +350,62 @@ mod test {
     };
     use arrow_schema::{DataType, Field};
     use datafusion::{
-        config::TableOptions, execution::SessionStateBuilder, prelude::SessionContext,
+        config::TableOptions, datasource::listing::ListingTableUrl, execution::SessionStateBuilder,
+        prelude::SessionContext,
     };
     use datafusion_common::plan_err;
-    use std::io::Write;
+    use std::{
+        io::{Read, Write},
+        path::PathBuf,
+    };
     use tempfile::TempDir;
+    use url::Url;
+
+    use crate::provider::{record_batch_reader_listing_table, RecordBatchReaderTableOptions};
 
     use super::*;
+
+    fn create_echo_spec_ctx() -> SessionContext {
+        let spec = Arc::new(EchoSpec::default());
+        let factory = RecordBatchReaderFormatFactory::new(spec.clone());
+
+        // Register the format
+        let mut state = SessionStateBuilder::new().build();
+        state.register_file_format(Arc::new(factory), true).unwrap();
+        SessionContext::new_with_state(state).enable_url_table()
+    }
+
+    fn create_echo_spec_temp_dir() -> (TempDir, Vec<PathBuf>) {
+        // Create a temporary directory with a few files with the declared extension
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+        let file0 = temp_path.join("item0.echospec");
+        std::fs::File::create(&file0)
+            .unwrap()
+            .write_all(b"not empty")
+            .unwrap();
+        let file1 = temp_path.join("item1.echospec");
+        std::fs::File::create(&file1)
+            .unwrap()
+            .write_all(b"not empty")
+            .unwrap();
+        (temp_dir, vec![file0, file1])
+    }
+
+    fn check_object_is_readable_file(location: &Object) {
+        let url = Url::parse(&location.to_url_string()).expect("valid uri");
+        assert_eq!(url.scheme(), "file");
+        let path = url.to_file_path().expect("can extract file path");
+
+        let mut content = String::new();
+        std::fs::File::open(path)
+            .expect("url can't be opened")
+            .read_to_string(&mut content)
+            .expect("failed to read");
+        if content.is_empty() {
+            panic!("empty file at url {url}");
+        }
+    }
 
     #[derive(Debug, Default, Clone)]
     struct EchoSpec {
@@ -392,7 +441,8 @@ mod test {
             Arc::new(self.clone())
         }
 
-        async fn infer_schema(&self, _location: &Object) -> Result<Schema> {
+        async fn infer_schema(&self, location: &Object) -> Result<Schema> {
+            check_object_is_readable_file(location);
             Ok(Schema::new(vec![
                 Field::new("src", DataType::Utf8, true),
                 Field::new("batch_size", DataType::Int64, true),
@@ -403,9 +453,10 @@ mod test {
 
         async fn infer_stats(
             &self,
-            _location: &Object,
+            location: &Object,
             table_schema: &Schema,
         ) -> Result<Statistics> {
+            check_object_is_readable_file(location);
             Ok(Statistics::new_unknown(table_schema))
         }
 
@@ -413,6 +464,8 @@ mod test {
             &self,
             args: &OpenReaderArgs,
         ) -> Result<Box<dyn RecordBatchReader + Send>> {
+            check_object_is_readable_file(&args.src);
+
             let src: StringArray = [args.src.clone()]
                 .iter()
                 .map(|item| Some(item.to_url_string()))
@@ -447,31 +500,12 @@ mod test {
 
     #[tokio::test]
     async fn spec_format() {
-        let spec = Arc::new(EchoSpec::default());
-        let factory = RecordBatchReaderFormatFactory::new(spec);
-
-        // Create a temporary directory with a few files with the declared extension
-        let temp_dir = TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-        let file0 = temp_path.join("item0.echospec");
-        std::fs::File::create(&file0)
-            .unwrap()
-            .write_all(b"not empty")
-            .unwrap();
-        let file1 = temp_path.join("item1.echospec");
-        std::fs::File::create(&file1)
-            .unwrap()
-            .write_all(b"not empty")
-            .unwrap();
-
-        // Register the format
-        let mut state = SessionStateBuilder::new().build();
-        state.register_file_format(Arc::new(factory), true).unwrap();
-        let ctx = SessionContext::new_with_state(state).enable_url_table();
+        let ctx = create_echo_spec_ctx();
+        let (temp_dir, files) = create_echo_spec_temp_dir();
 
         // Select using just the filename and ensure we get a result
         let batches_item0 = ctx
-            .table(file0.to_string_lossy().to_string())
+            .table(files[0].to_string_lossy().to_string())
             .await
             .unwrap()
             .collect()
@@ -480,5 +514,50 @@ mod test {
 
         assert_eq!(batches_item0.len(), 1);
         assert_eq!(batches_item0[0].num_rows(), 1);
+
+        // With a glob we should get all the files
+        let batches = ctx
+            .table(format!("{}/*.echospec", temp_dir.path().to_string_lossy()))
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        // We should get one value per partition
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].num_rows(), 1);
+        assert_eq!(batches[1].num_rows(), 1);
+    }
+
+    #[tokio::test]
+    async fn spec_listing_table() {
+        let spec = Arc::new(EchoSpec::default());
+        let ctx = SessionContext::new();
+        let (_temp_dir, files) = create_echo_spec_temp_dir();
+
+        // Select using a listing table and ensure we get a result
+        let options = RecordBatchReaderTableOptions::new(spec);
+        let provider = record_batch_reader_listing_table(
+            &ctx,
+            files
+                .iter()
+                .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
+                .collect(),
+            options,
+        )
+        .await
+        .unwrap();
+
+        let batches = ctx
+            .read_table(Arc::new(provider))
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        // We should get one value per partition
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].num_rows(), 1);
+        assert_eq!(batches[1].num_rows(), 1);
     }
 }

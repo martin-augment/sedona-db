@@ -33,6 +33,7 @@ use crate::{format::RecordBatchReaderFormat, spec::RecordBatchReaderFormatSpec};
 pub struct RecordBatchReaderTableOptions {
     spec: Arc<dyn RecordBatchReaderFormatSpec>,
     table_partition_cols: Vec<(String, DataType)>,
+    check_extension: bool,
     options: HashMap<String, String>,
 }
 
@@ -41,6 +42,7 @@ impl RecordBatchReaderTableOptions {
         Self {
             spec,
             table_partition_cols: Vec::new(),
+            check_extension: true,
             options: HashMap::new(),
         }
     }
@@ -73,7 +75,7 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
 }
 
 /// Create a [ListingTable] of GeoParquet (or normal Parquet) files
-pub async fn generic_listing_table(
+pub async fn record_batch_reader_listing_table(
     context: &SessionContext,
     table_paths: Vec<ListingTableUrl>,
     mut options: RecordBatchReaderTableOptions,
@@ -91,7 +93,7 @@ pub async fn generic_listing_table(
     }
 
     // check if the file extension matches the expected extension if one is provided
-    if !option_extension.is_empty() {
+    if !option_extension.is_empty() && options.check_extension {
         for path in &table_paths {
             let file_path = path.as_str();
             if !file_path.ends_with(option_extension.clone().as_str()) && !path.is_collection() {
