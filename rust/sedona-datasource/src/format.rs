@@ -450,6 +450,7 @@ mod test {
         let spec = Arc::new(EchoSpec::default());
         let factory = RecordBatchReaderFormatFactory::new(spec);
 
+        // Create a temporary directory with a few files with the declared extension
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
         let file0 = temp_path.join("item0.echospec");
@@ -463,10 +464,12 @@ mod test {
             .write_all(b"not empty")
             .unwrap();
 
+        // Register the format
         let mut state = SessionStateBuilder::new().build();
         state.register_file_format(Arc::new(factory), true).unwrap();
         let ctx = SessionContext::new_with_state(state).enable_url_table();
 
+        // Select using just the filename and ensure we get a result
         let batches_item0 = ctx
             .table(file0.to_string_lossy().to_string())
             .await
