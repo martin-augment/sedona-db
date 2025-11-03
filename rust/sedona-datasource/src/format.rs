@@ -25,7 +25,8 @@ use datafusion::{
         file_format::{file_compression_type::FileCompressionType, FileFormat, FileFormatFactory},
         listing::PartitionedFile,
         physical_plan::{
-            FileMeta, FileOpenFuture, FileOpener, FileScanConfig, FileSinkConfig, FileSource,
+            FileGroupPartitioner, FileMeta, FileOpenFuture, FileOpener, FileScanConfig,
+            FileSinkConfig, FileSource,
         },
     },
 };
@@ -41,7 +42,7 @@ use futures::{StreamExt, TryStreamExt};
 use object_store::{ObjectMeta, ObjectStore};
 use sedona_common::sedona_internal_err;
 
-use crate::spec::{Object, OpenReaderArgs, RecordBatchReaderFormatSpec};
+use crate::spec::{Object, OpenReaderArgs, RecordBatchReaderFormatSpec, SupportsRepartition};
 
 #[derive(Debug)]
 pub struct RecordBatchReaderFormatFactory {
@@ -125,9 +126,10 @@ impl FileFormat for RecordBatchReaderFormat {
                 let schema = self
                     .spec
                     .infer_schema(&Object {
-                        store: store.clone(),
+                        store: Some(store.clone()),
                         url: None,
                         meta: Some(object.clone()),
+                        range: None,
                     })
                     .await?;
                 Ok::<_, DataFusionError>((object.location.clone(), schema))
@@ -158,9 +160,10 @@ impl FileFormat for RecordBatchReaderFormat {
         self.spec
             .infer_stats(
                 &Object {
-                    store: store.clone(),
+                    store: Some(store.clone()),
                     url: None,
                     meta: Some(object.clone()),
+                    range: None,
                 },
                 &table_schema,
             )
@@ -224,9 +227,10 @@ impl FileSource for SedonaFileSource {
     ) -> Arc<dyn FileOpener> {
         let args = OpenReaderArgs {
             src: Object {
-                store: store.clone(),
+                store: Some(store.clone()),
                 url: Some(base_config.object_store_url.clone()),
                 meta: None,
+                range: None,
             },
             batch_size: self.batch_size,
             file_schema: self.file_schema.clone(),
@@ -304,16 +308,35 @@ impl FileSource for SedonaFileSource {
         self.spec.extension()
     }
 
-    // File formats implemented in this way can't be repartitioned. File formats that
-    // benefit from this need their own FileFormat implementation.
     fn repartitioned(
         &self,
-        _target_partitions: usize,
-        _repartition_file_min_size: usize,
-        _output_ordering: Option<LexOrdering>,
-        _config: &FileScanConfig,
+        target_partitions: usize,
+        repartition_file_min_size: usize,
+        output_ordering: Option<LexOrdering>,
+        config: &FileScanConfig,
     ) -> Result<Option<FileScanConfig>> {
-        Ok(None)
+        match self.spec.supports_repartition() {
+            SupportsRepartition::None => Ok(None),
+            SupportsRepartition::ByRange => {
+                // Default implementation
+                if config.file_compression_type.is_compressed() || config.new_lines_in_values {
+                    return Ok(None);
+                }
+
+                let repartitioned_file_groups_option = FileGroupPartitioner::new()
+                    .with_target_partitions(target_partitions)
+                    .with_repartition_file_min_size(repartition_file_min_size)
+                    .with_preserve_order_within_groups(output_ordering.is_some())
+                    .repartition_file_groups(&config.file_groups);
+
+                if let Some(repartitioned_file_groups) = repartitioned_file_groups_option {
+                    let mut source = config.clone();
+                    source.file_groups = repartitioned_file_groups;
+                    return Ok(Some(source));
+                }
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -334,6 +357,7 @@ impl FileOpener for SimpleOpener {
         let mut self_clone = self.clone();
         Ok(Box::pin(async move {
             self_clone.args.src.meta.replace(file_meta.object_meta);
+            self_clone.args.src.range = file_meta.range;
             let reader = self_clone.spec.open_reader(&self_clone.args).await?;
             let stream =
                 futures::stream::iter(reader.into_iter().map(|batch| batch.map_err(Into::into)));

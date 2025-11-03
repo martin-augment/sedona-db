@@ -21,7 +21,7 @@ use arrow_array::RecordBatchReader;
 use arrow_schema::{Schema, SchemaRef};
 use async_trait::async_trait;
 
-use datafusion::config::TableOptions;
+use datafusion::{config::TableOptions, datasource::listing::FileRange};
 use datafusion_common::{Result, Statistics};
 use datafusion_execution::object_store::ObjectStoreUrl;
 use datafusion_physical_expr::PhysicalExpr;
@@ -38,12 +38,21 @@ pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
         &self,
         table_options: &TableOptions,
     ) -> Arc<dyn RecordBatchReaderFormatSpec>;
+    fn supports_repartition(&self) -> SupportsRepartition {
+        SupportsRepartition::None
+    }
     async fn infer_schema(&self, location: &Object) -> Result<Schema>;
     async fn infer_stats(&self, _location: &Object, table_schema: &Schema) -> Result<Statistics> {
         Ok(Statistics::new_unknown(table_schema))
     }
     async fn open_reader(&self, args: &OpenReaderArgs)
         -> Result<Box<dyn RecordBatchReader + Send>>;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SupportsRepartition {
+    None,
+    ByRange,
 }
 
 #[derive(Debug, Clone)]
@@ -57,9 +66,10 @@ pub struct OpenReaderArgs {
 
 #[derive(Debug, Clone)]
 pub struct Object {
-    pub store: Arc<dyn ObjectStore>,
+    pub store: Option<Arc<dyn ObjectStore>>,
     pub url: Option<ObjectStoreUrl>,
     pub meta: Option<ObjectMeta>,
+    pub range: Option<FileRange>,
 }
 
 impl Object {
