@@ -165,7 +165,7 @@ pub struct Object {
 impl Object {
     /// Convert this object to a URL string, if possible
     ///
-    /// Returns `None` if there is not suficient information in the Object to calculate
+    /// Returns `None` if there is not sufficient information in the Object to calculate
     /// this.
     pub fn to_url_string(&self) -> Option<String> {
         match (&self.url, &self.meta) {

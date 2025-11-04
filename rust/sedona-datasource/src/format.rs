@@ -46,7 +46,7 @@ use crate::spec::{ExternalFormatSpec, Object, OpenReaderArgs, SupportsRepartitio
 
 /// Create a [FileFormatFactory] from a [ExternalFormatSpec]
 ///
-/// The FileFormatFactory is the object that may be reigstered with a
+/// The FileFormatFactory is the object that may be registered with a
 /// SessionStateBuilder to allow SQL queries to access this format.
 #[derive(Debug)]
 pub struct ExternalFormatFactory {
