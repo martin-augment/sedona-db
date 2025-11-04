@@ -61,7 +61,7 @@ pub struct OpenReaderArgs {
     pub batch_size: Option<usize>,
     pub file_schema: Option<SchemaRef>,
     pub file_projection: Option<Vec<usize>>,
-    pub filters: Option<Vec<Arc<dyn PhysicalExpr>>>,
+    pub filters: Vec<Arc<dyn PhysicalExpr>>,
 }
 
 #[derive(Debug, Clone)]

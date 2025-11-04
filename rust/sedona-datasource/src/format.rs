@@ -199,7 +199,7 @@ struct SedonaFileSource {
     batch_size: Option<usize>,
     file_schema: Option<SchemaRef>,
     file_projection: Option<Vec<usize>>,
-    filters: Option<Vec<Arc<dyn PhysicalExpr>>>,
+    filters: Vec<Arc<dyn PhysicalExpr>>,
     metrics: ExecutionPlanMetricsSet,
     projected_statistics: Option<Statistics>,
 }
@@ -211,7 +211,7 @@ impl SedonaFileSource {
             batch_size: None,
             file_schema: None,
             file_projection: None,
-            filters: None,
+            filters: Vec::new(),
             metrics: ExecutionPlanMetricsSet::default(),
             projected_statistics: None,
         }
@@ -249,14 +249,17 @@ impl FileSource for SedonaFileSource {
         filters: Vec<Arc<dyn PhysicalExpr>>,
         _config: &ConfigOptions,
     ) -> Result<FilterPushdownPropagation<Arc<dyn FileSource>>> {
+        let num_filters = filters.len();
+        let mut new_filters = self.filters.clone();
+        new_filters.extend(filters);
         let source = Self {
-            filters: Some(filters.clone()),
+            filters: new_filters,
             ..self.clone()
         };
 
         Ok(FilterPushdownPropagation::with_parent_pushdown_result(vec![
             PushedDown::No;
-            filters.len()
+            num_filters
         ])
         .with_updated_node(Arc::new(source)))
     }
@@ -501,9 +504,7 @@ mod test {
                 .iter()
                 .map(|item| item.map(|i| i as i64))
                 .collect();
-            let filter_count: Int32Array = [args.filters.clone().map(|f| f.len() as i32)]
-                .iter()
-                .collect();
+            let filter_count: Int32Array = [args.filters.len() as i32].into_iter().collect();
             let option_value: StringArray = [self.option_value.clone()].iter().collect();
 
             let schema = Arc::new(self.infer_schema(&args.src).await?);
@@ -559,14 +560,14 @@ mod test {
     #[tokio::test]
     async fn spec_format_project_filter() {
         let ctx = create_echo_spec_ctx();
-        let (_temp_dir, files) = create_echo_spec_temp_dir();
+        let (temp_dir, _files) = create_echo_spec_temp_dir();
 
         // Ensure that if we pass
         let batches = ctx
-            .table(files[0].to_string_lossy().to_string())
+            .table(format!("{}/*.echospec", temp_dir.path().to_string_lossy()))
             .await
             .unwrap()
-            .filter(col("src").like(lit("%echospec")))
+            .filter(col("src").like(lit("%item0%")))
             .unwrap()
             .select(vec![col("batch_size"), col("filter_count")])
             .unwrap()
@@ -574,7 +575,6 @@ mod test {
             .await
             .unwrap();
 
-        // We don't seem to be getting the filter here :(
         assert_batches_eq!(
             [
                 "+------------+--------------+",
