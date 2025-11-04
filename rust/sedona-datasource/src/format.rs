@@ -42,36 +42,36 @@ use futures::{StreamExt, TryStreamExt};
 use object_store::{ObjectMeta, ObjectStore};
 use sedona_common::sedona_internal_err;
 
-use crate::spec::{Object, OpenReaderArgs, RecordBatchReaderFormatSpec, SupportsRepartition};
+use crate::spec::{ExternalFormatSpec, Object, OpenReaderArgs, SupportsRepartition};
 
-/// Create a [FileFormatFactory] from a [RecordBatchReaderFormatSpec]
+/// Create a [FileFormatFactory] from a [ExternalFormatSpec]
 ///
 /// The FileFormatFactory is the object that may be reigstered with a
 /// SessionStateBuilder to allow SQL queries to access this format.
 #[derive(Debug)]
-pub struct RecordBatchReaderFormatFactory {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+pub struct ExternalFormatFactory {
+    spec: Arc<dyn ExternalFormatSpec>,
 }
 
-impl RecordBatchReaderFormatFactory {
-    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
+impl ExternalFormatFactory {
+    pub fn new(spec: Arc<dyn ExternalFormatSpec>) -> Self {
         Self { spec }
     }
 }
 
-impl FileFormatFactory for RecordBatchReaderFormatFactory {
+impl FileFormatFactory for ExternalFormatFactory {
     fn create(
         &self,
         _state: &dyn Session,
         format_options: &HashMap<String, String>,
     ) -> Result<Arc<dyn FileFormat>> {
-        Ok(Arc::new(RecordBatchReaderFormat {
+        Ok(Arc::new(ExternalFileFormat {
             spec: self.spec.with_options(format_options)?,
         }))
     }
 
     fn default(&self) -> Arc<dyn FileFormat> {
-        Arc::new(RecordBatchReaderFormat {
+        Arc::new(ExternalFileFormat {
             spec: self.spec.clone(),
         })
     }
@@ -81,25 +81,25 @@ impl FileFormatFactory for RecordBatchReaderFormatFactory {
     }
 }
 
-impl GetExt for RecordBatchReaderFormatFactory {
+impl GetExt for ExternalFormatFactory {
     fn get_ext(&self) -> String {
         self.spec.extension().to_string()
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct RecordBatchReaderFormat {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+pub(crate) struct ExternalFileFormat {
+    spec: Arc<dyn ExternalFormatSpec>,
 }
 
-impl RecordBatchReaderFormat {
-    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
+impl ExternalFileFormat {
+    pub fn new(spec: Arc<dyn ExternalFormatSpec>) -> Self {
         Self { spec }
     }
 }
 
 #[async_trait]
-impl FileFormat for RecordBatchReaderFormat {
+impl FileFormat for ExternalFileFormat {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -193,13 +193,13 @@ impl FileFormat for RecordBatchReaderFormat {
     }
 
     fn file_source(&self) -> Arc<dyn FileSource> {
-        Arc::new(SedonaFileSource::new(self.spec.clone()))
+        Arc::new(ExternalFileSource::new(self.spec.clone()))
     }
 }
 
 #[derive(Debug, Clone)]
-struct SedonaFileSource {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+struct ExternalFileSource {
+    spec: Arc<dyn ExternalFormatSpec>,
     batch_size: Option<usize>,
     file_schema: Option<SchemaRef>,
     file_projection: Option<Vec<usize>>,
@@ -208,8 +208,8 @@ struct SedonaFileSource {
     projected_statistics: Option<Statistics>,
 }
 
-impl SedonaFileSource {
-    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
+impl ExternalFileSource {
+    pub fn new(spec: Arc<dyn ExternalFormatSpec>) -> Self {
         Self {
             spec,
             batch_size: None,
@@ -222,7 +222,7 @@ impl SedonaFileSource {
     }
 }
 
-impl FileSource for SedonaFileSource {
+impl FileSource for ExternalFileSource {
     fn create_file_opener(
         &self,
         store: Arc<dyn ObjectStore>,
@@ -242,7 +242,7 @@ impl FileSource for SedonaFileSource {
             filters: self.filters.clone(),
         };
 
-        Arc::new(SimpleOpener {
+        Arc::new(ExternalFileOpener {
             spec: self.spec.clone(),
             args,
         })
@@ -351,12 +351,12 @@ impl FileSource for SedonaFileSource {
 }
 
 #[derive(Debug, Clone)]
-struct SimpleOpener {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+struct ExternalFileOpener {
+    spec: Arc<dyn ExternalFormatSpec>,
     args: OpenReaderArgs,
 }
 
-impl FileOpener for SimpleOpener {
+impl FileOpener for ExternalFileOpener {
     fn open(&self, file_meta: FileMeta, _file: PartitionedFile) -> Result<FileOpenFuture> {
         if file_meta.range.is_some() {
             return sedona_internal_err!(
@@ -397,13 +397,13 @@ mod test {
     use tempfile::TempDir;
     use url::Url;
 
-    use crate::provider::record_batch_reader_listing_table;
+    use crate::provider::external_listing_table;
 
     use super::*;
 
     fn create_echo_spec_ctx() -> SessionContext {
         let spec = Arc::new(EchoSpec::default());
-        let factory = RecordBatchReaderFormatFactory::new(spec.clone());
+        let factory = ExternalFormatFactory::new(spec.clone());
 
         // Register the format
         let mut state = SessionStateBuilder::new().build();
@@ -449,7 +449,7 @@ mod test {
     }
 
     #[async_trait]
-    impl RecordBatchReaderFormatSpec for EchoSpec {
+    impl ExternalFormatSpec for EchoSpec {
         fn extension(&self) -> &str {
             "echospec"
         }
@@ -457,7 +457,7 @@ mod test {
         fn with_options(
             &self,
             options: &HashMap<String, String>,
-        ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>> {
+        ) -> Result<Arc<dyn ExternalFormatSpec>> {
             let mut self_clone = self.clone();
             for (k, v) in options {
                 if k == "option_value" {
@@ -593,7 +593,7 @@ mod test {
         let (_temp_dir, files) = create_echo_spec_temp_dir();
 
         // Select using a listing table and ensure we get a result
-        let provider = record_batch_reader_listing_table(
+        let provider = external_listing_table(
             spec,
             &ctx,
             files
@@ -628,7 +628,7 @@ mod test {
         let (_temp_dir, files) = create_echo_spec_temp_dir();
 
         // Select using a listing table and ensure we get a result with the option passed
-        let provider = record_batch_reader_listing_table(
+        let provider = external_listing_table(
             spec,
             &ctx,
             files
@@ -671,7 +671,7 @@ mod test {
         let (temp_dir, mut files) = create_echo_spec_temp_dir();
 
         // Listing table with no files should error
-        let err = record_batch_reader_listing_table(spec.clone(), &ctx, vec![], true)
+        let err = external_listing_table(spec.clone(), &ctx, vec![], true)
             .await
             .unwrap_err();
         assert_eq!(err.message(), "No table paths were provided");
@@ -685,7 +685,7 @@ mod test {
         files.push(file2);
 
         // With check_extension as true we should get an error
-        let err = record_batch_reader_listing_table(
+        let err = external_listing_table(
             spec.clone(),
             &ctx,
             files
@@ -702,7 +702,7 @@ mod test {
             .ends_with("does not match the expected extension 'echospec'"));
 
         // ...but we should be able to turn off the error
-        record_batch_reader_listing_table(
+        external_listing_table(
             spec,
             &ctx,
             files

@@ -37,10 +37,10 @@ use object_store::{ObjectMeta, ObjectStore};
 /// intended to provide a less verbose way to implement readers for a wide
 /// variety of spatial formats.
 #[async_trait]
-pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
+pub trait ExternalFormatSpec: Debug + Send + Sync {
     /// Infer a schema for a given file
     ///
-    /// Given a single file, infer what schema [RecordBatchReaderFormatSpec::open_reader]
+    /// Given a single file, infer what schema [ExternalFormatSpec::open_reader]
     /// would produce in the absence of any other guidance.
     async fn infer_schema(&self, location: &Object) -> Result<Schema>;
 
@@ -63,7 +63,7 @@ pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
     fn with_options(
         &self,
         options: &HashMap<String, String>,
-    ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>>;
+    ) -> Result<Arc<dyn ExternalFormatSpec>>;
 
     /// Fill in default options from [TableOptions]
     ///
@@ -71,11 +71,11 @@ pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
     /// options can be set for various table formats. If the defaults for a built-in
     /// table format are reasonable to fill in or if Extensions have been set,
     /// these can be accessed and used to fill default options. Note that any options
-    /// set with [RecordBatchReaderFormatSpec::with_options] should take precedent.
+    /// set with [ExternalFormatSpec::with_options] should take precedent.
     fn with_table_options(
         &self,
         _table_options: &TableOptions,
-    ) -> Option<Arc<dyn RecordBatchReaderFormatSpec>> {
+    ) -> Option<Arc<dyn ExternalFormatSpec>> {
         None
     }
 
@@ -84,7 +84,7 @@ pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
     /// This allows an implementation to opt in to DataFusion's built-in file size
     /// based partitioner, which works well for partitioning files where a simple
     /// file plus byte range is sufficient. The default opts out of this feature
-    /// (i.e., every file is passed exactly one to [RecordBatchReaderFormatSpec::open_reader]
+    /// (i.e., every file is passed exactly one to [ExternalFormatSpec::open_reader]
     /// without a `range`).
     fn supports_repartition(&self) -> SupportsRepartition {
         SupportsRepartition::None
@@ -105,7 +105,7 @@ pub enum SupportsRepartition {
     ByRange,
 }
 
-/// Arguments to [RecordBatchReaderFormatSpec::open_reader]
+/// Arguments to [ExternalFormatSpec::open_reader]
 #[derive(Debug, Clone)]
 pub struct OpenReaderArgs {
     /// The input file, or partial file if [SupportsRepartition::ByRange] is used
@@ -120,7 +120,7 @@ pub struct OpenReaderArgs {
     /// The requested file schema, if specified
     ///
     /// DataFusion will usually fill this in to the schema inferred by
-    /// [RecordBatchReaderFormatSpec::infer_schema].
+    /// [ExternalFormatSpec::infer_schema].
     pub file_schema: Option<SchemaRef>,
 
     /// The requested field indices

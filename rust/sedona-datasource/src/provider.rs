@@ -27,10 +27,14 @@ use datafusion::{
 };
 use datafusion_common::{exec_err, Result};
 
-use crate::{format::RecordBatchReaderFormat, spec::RecordBatchReaderFormatSpec};
+use crate::{format::ExternalFileFormat, spec::ExternalFormatSpec};
 
-pub async fn record_batch_reader_listing_table(
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+/// Create a [ListingTable] from an [ExternalFormatSpec] and one or more URLs
+///
+/// This can be used to resolve a format specification into a TableProvider that
+/// may be registered with a [SessionContext].
+pub async fn external_listing_table(
+    spec: Arc<dyn ExternalFormatSpec>,
     context: &SessionContext,
     table_paths: Vec<ListingTableUrl>,
     check_extension: bool,
@@ -73,7 +77,7 @@ pub async fn record_batch_reader_listing_table(
 
 #[derive(Debug, Clone)]
 struct RecordBatchReaderTableOptions {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+    spec: Arc<dyn ExternalFormatSpec>,
     check_extension: bool,
 }
 
@@ -85,9 +89,9 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
         table_options: TableOptions,
     ) -> ListingOptions {
         let format = if let Some(modified) = self.spec.with_table_options(&table_options) {
-            RecordBatchReaderFormat::new(modified)
+            ExternalFileFormat::new(modified)
         } else {
-            RecordBatchReaderFormat::new(self.spec.clone())
+            ExternalFileFormat::new(self.spec.clone())
         };
 
         ListingOptions::new(Arc::new(format))
