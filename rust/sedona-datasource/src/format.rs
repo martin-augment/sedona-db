@@ -44,6 +44,10 @@ use sedona_common::sedona_internal_err;
 
 use crate::spec::{Object, OpenReaderArgs, RecordBatchReaderFormatSpec, SupportsRepartition};
 
+/// Create a [FileFormatFactory] from a [RecordBatchReaderFormatSpec]
+///
+/// The FileFormatFactory is the object that may be reigstered with a
+/// SessionStateBuilder to allow SQL queries to access this format.
 #[derive(Debug)]
 pub struct RecordBatchReaderFormatFactory {
     spec: Arc<dyn RecordBatchReaderFormatSpec>,
@@ -84,7 +88,7 @@ impl GetExt for RecordBatchReaderFormatFactory {
 }
 
 #[derive(Debug)]
-pub struct RecordBatchReaderFormat {
+pub(crate) struct RecordBatchReaderFormat {
     spec: Arc<dyn RecordBatchReaderFormatSpec>,
 }
 
