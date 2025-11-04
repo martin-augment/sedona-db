@@ -253,6 +253,7 @@ impl FileSource for SedonaFileSource {
         filters: Vec<Arc<dyn PhysicalExpr>>,
         _config: &ConfigOptions,
     ) -> Result<FilterPushdownPropagation<Arc<dyn FileSource>>> {
+        // Record any new filters
         let num_filters = filters.len();
         let mut new_filters = self.filters.clone();
         new_filters.extend(filters);
@@ -261,6 +262,8 @@ impl FileSource for SedonaFileSource {
             ..self.clone()
         };
 
+        // ...but don't indicate that we handled them so that the filters are
+        // applied by the other node.
         Ok(FilterPushdownPropagation::with_parent_pushdown_result(vec![
             PushedDown::No;
             num_filters
