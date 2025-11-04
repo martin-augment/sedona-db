@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use arrow_schema::{DataType, SchemaRef};
+use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::{
     config::TableOptions,
@@ -31,19 +31,15 @@ use crate::{format::RecordBatchReaderFormat, spec::RecordBatchReaderFormatSpec};
 
 #[derive(Debug, Clone)]
 pub struct RecordBatchReaderTableOptions {
-    spec: Arc<dyn RecordBatchReaderFormatSpec>,
-    table_partition_cols: Vec<(String, DataType)>,
-    check_extension: bool,
-    options: HashMap<String, String>,
+    pub spec: Arc<dyn RecordBatchReaderFormatSpec>,
+    pub check_extension: bool,
 }
 
 impl RecordBatchReaderTableOptions {
     pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
         Self {
             spec,
-            table_partition_cols: Vec::new(),
             check_extension: true,
-            options: HashMap::new(),
         }
     }
 }
@@ -58,7 +54,6 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
         let format = RecordBatchReaderFormat::new(self.spec.with_table_options(&table_options));
         ListingOptions::new(Arc::new(format))
             .with_file_extension(self.spec.extension())
-            .with_table_partition_cols(self.table_partition_cols.clone())
             .with_session_config_options(config)
     }
 
@@ -77,11 +72,9 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
 pub async fn record_batch_reader_listing_table(
     context: &SessionContext,
     table_paths: Vec<ListingTableUrl>,
-    mut options: RecordBatchReaderTableOptions,
+    options: RecordBatchReaderTableOptions,
 ) -> Result<ListingTable> {
     let session_config = context.copied_config();
-
-    options.spec = options.spec.with_options(&options.options)?;
     let listing_options =
         options.to_listing_options(&session_config, context.copied_table_options());
 

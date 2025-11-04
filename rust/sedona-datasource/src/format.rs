@@ -618,4 +618,101 @@ mod test {
         assert_eq!(batches[0].num_rows(), 1);
         assert_eq!(batches[1].num_rows(), 1);
     }
+
+    #[tokio::test]
+    async fn spec_listing_table_options() {
+        let spec = Arc::new(EchoSpec::default())
+            .with_options(&[("option_value".to_string(), "foofy".to_string())].into())
+            .unwrap();
+
+        let ctx = SessionContext::new();
+        let (_temp_dir, files) = create_echo_spec_temp_dir();
+
+        // Select using a listing table and ensure we get a result with the option passed
+        let options = RecordBatchReaderTableOptions::new(spec);
+        let provider = record_batch_reader_listing_table(
+            &ctx,
+            files
+                .iter()
+                .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
+                .collect(),
+            options,
+        )
+        .await
+        .unwrap();
+
+        let batches = ctx
+            .read_table(Arc::new(provider))
+            .unwrap()
+            .select(vec![col("batch_size"), col("option_value")])
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_batches_eq!(
+            [
+                "+------------+--------------+",
+                "| batch_size | option_value |",
+                "+------------+--------------+",
+                "| 8192       | foofy        |",
+                "| 8192       | foofy        |",
+                "+------------+--------------+",
+            ],
+            &batches
+        );
+    }
+
+    #[tokio::test]
+    async fn spec_listing_table_errors() {
+        let spec = Arc::new(EchoSpec::default())
+            .with_options(&[("option_value".to_string(), "foofy".to_string())].into())
+            .unwrap();
+
+        let ctx = SessionContext::new();
+        let mut options = RecordBatchReaderTableOptions::new(spec);
+        let (temp_dir, mut files) = create_echo_spec_temp_dir();
+
+        // Listing table with no files should error
+        let err = record_batch_reader_listing_table(&ctx, vec![], options.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), "No table paths were provided");
+
+        // Create a file with a different extension
+        let file2 = temp_dir.path().join("item2.echospecNOT");
+        std::fs::File::create(&file2)
+            .unwrap()
+            .write_all(b"not empty")
+            .unwrap();
+        files.push(file2);
+
+        // With the default options we should get an error
+        let err = record_batch_reader_listing_table(
+            &ctx,
+            files
+                .iter()
+                .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
+                .collect(),
+            options.clone(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err
+            .message()
+            .ends_with("does not match the expected extension 'echospec'"));
+
+        // ...but we should be able to turn off the error
+        options.check_extension = false;
+        record_batch_reader_listing_table(
+            &ctx,
+            files
+                .iter()
+                .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
+                .collect(),
+            options,
+        )
+        .await
+        .unwrap();
+    }
 }

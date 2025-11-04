@@ -78,7 +78,8 @@ impl Object {
             (None, None) => format!("{:?}", self.store),
             (None, Some(meta)) => {
                 // There's no great way to map an object_store to a url prefix if we're not
-                // provided the `url`; however, this is what we have access to on occasion.
+                // provided the `url`; however, this is what we have access to in the
+                // Schema and Statistics resolution phases of the FileFormat.
                 // This is a heuristic that should work for https and a local filesystem,
                 // which is what we might be able to expect a non-DataFusion system like
                 // GDAL to be able to translate.
