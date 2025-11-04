@@ -391,7 +391,7 @@ mod test {
     use tempfile::TempDir;
     use url::Url;
 
-    use crate::provider::{record_batch_reader_listing_table, RecordBatchReaderTableOptions};
+    use crate::provider::record_batch_reader_listing_table;
 
     use super::*;
 
@@ -594,14 +594,14 @@ mod test {
         let (_temp_dir, files) = create_echo_spec_temp_dir();
 
         // Select using a listing table and ensure we get a result
-        let options = RecordBatchReaderTableOptions::new(spec);
         let provider = record_batch_reader_listing_table(
+            spec,
             &ctx,
             files
                 .iter()
                 .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
                 .collect(),
-            options,
+            true,
         )
         .await
         .unwrap();
@@ -629,14 +629,14 @@ mod test {
         let (_temp_dir, files) = create_echo_spec_temp_dir();
 
         // Select using a listing table and ensure we get a result with the option passed
-        let options = RecordBatchReaderTableOptions::new(spec);
         let provider = record_batch_reader_listing_table(
+            spec,
             &ctx,
             files
                 .iter()
                 .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
                 .collect(),
-            options,
+            true,
         )
         .await
         .unwrap();
@@ -669,11 +669,10 @@ mod test {
             .unwrap();
 
         let ctx = SessionContext::new();
-        let mut options = RecordBatchReaderTableOptions::new(spec);
         let (temp_dir, mut files) = create_echo_spec_temp_dir();
 
         // Listing table with no files should error
-        let err = record_batch_reader_listing_table(&ctx, vec![], options.clone())
+        let err = record_batch_reader_listing_table(spec.clone(), &ctx, vec![], true)
             .await
             .unwrap_err();
         assert_eq!(err.message(), "No table paths were provided");
@@ -686,14 +685,15 @@ mod test {
             .unwrap();
         files.push(file2);
 
-        // With the default options we should get an error
+        // With check_extension as true we should get an error
         let err = record_batch_reader_listing_table(
+            spec.clone(),
             &ctx,
             files
                 .iter()
                 .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
                 .collect(),
-            options.clone(),
+            true,
         )
         .await
         .unwrap_err();
@@ -703,14 +703,14 @@ mod test {
             .ends_with("does not match the expected extension 'echospec'"));
 
         // ...but we should be able to turn off the error
-        options.check_extension = false;
         record_batch_reader_listing_table(
+            spec,
             &ctx,
             files
                 .iter()
                 .map(|f| ListingTableUrl::parse(f.to_string_lossy()).unwrap())
                 .collect(),
-            options,
+            false,
         )
         .await
         .unwrap();

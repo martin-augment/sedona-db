@@ -29,52 +29,17 @@ use datafusion_common::{exec_err, Result};
 
 use crate::{format::RecordBatchReaderFormat, spec::RecordBatchReaderFormatSpec};
 
-#[derive(Debug, Clone)]
-pub struct RecordBatchReaderTableOptions {
-    pub spec: Arc<dyn RecordBatchReaderFormatSpec>,
-    pub check_extension: bool,
-}
-
-impl RecordBatchReaderTableOptions {
-    pub fn new(spec: Arc<dyn RecordBatchReaderFormatSpec>) -> Self {
-        Self {
-            spec,
-            check_extension: true,
-        }
-    }
-}
-
-#[async_trait]
-impl ReadOptions<'_> for RecordBatchReaderTableOptions {
-    fn to_listing_options(
-        &self,
-        config: &SessionConfig,
-        table_options: TableOptions,
-    ) -> ListingOptions {
-        let format = RecordBatchReaderFormat::new(self.spec.with_table_options(&table_options));
-        ListingOptions::new(Arc::new(format))
-            .with_file_extension(self.spec.extension())
-            .with_session_config_options(config)
-    }
-
-    async fn get_resolved_schema(
-        &self,
-        config: &SessionConfig,
-        state: SessionState,
-        table_path: ListingTableUrl,
-    ) -> Result<SchemaRef> {
-        self.to_listing_options(config, state.default_table_options())
-            .infer_schema(&state, &table_path)
-            .await
-    }
-}
-
 pub async fn record_batch_reader_listing_table(
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
     context: &SessionContext,
     table_paths: Vec<ListingTableUrl>,
-    options: RecordBatchReaderTableOptions,
+    check_extension: bool,
 ) -> Result<ListingTable> {
     let session_config = context.copied_config();
+    let options = RecordBatchReaderTableOptions {
+        spec,
+        check_extension,
+    };
     let listing_options =
         options.to_listing_options(&session_config, context.copied_table_options());
 
@@ -104,4 +69,35 @@ pub async fn record_batch_reader_listing_table(
         .with_schema(resolved_schema);
 
     ListingTable::try_new(config)
+}
+
+#[derive(Debug, Clone)]
+struct RecordBatchReaderTableOptions {
+    spec: Arc<dyn RecordBatchReaderFormatSpec>,
+    check_extension: bool,
+}
+
+#[async_trait]
+impl ReadOptions<'_> for RecordBatchReaderTableOptions {
+    fn to_listing_options(
+        &self,
+        config: &SessionConfig,
+        table_options: TableOptions,
+    ) -> ListingOptions {
+        let format = RecordBatchReaderFormat::new(self.spec.with_table_options(&table_options));
+        ListingOptions::new(Arc::new(format))
+            .with_file_extension(self.spec.extension())
+            .with_session_config_options(config)
+    }
+
+    async fn get_resolved_schema(
+        &self,
+        config: &SessionConfig,
+        state: SessionState,
+        table_path: ListingTableUrl,
+    ) -> Result<SchemaRef> {
+        self.to_listing_options(config, state.default_table_options())
+            .infer_schema(&state, &table_path)
+            .await
+    }
 }
