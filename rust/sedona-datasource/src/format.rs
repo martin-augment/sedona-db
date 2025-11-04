@@ -378,7 +378,6 @@ mod test {
     use arrow_schema::{DataType, Field};
     use datafusion::{
         assert_batches_eq,
-        config::TableOptions,
         datasource::listing::ListingTableUrl,
         execution::SessionStateBuilder,
         prelude::{col, lit, SessionContext},
@@ -423,7 +422,7 @@ mod test {
     }
 
     fn check_object_is_readable_file(location: &Object) {
-        let url = Url::parse(&location.to_url_string()).expect("valid uri");
+        let url = Url::parse(&location.to_url_string().unwrap()).expect("valid uri");
         assert_eq!(url.scheme(), "file");
         let path = url.to_file_path().expect("can extract file path");
 
@@ -464,13 +463,6 @@ mod test {
             Ok(Arc::new(self_clone))
         }
 
-        fn with_table_options(
-            &self,
-            _table_options: &TableOptions,
-        ) -> Arc<dyn RecordBatchReaderFormatSpec> {
-            Arc::new(self.clone())
-        }
-
         async fn infer_schema(&self, location: &Object) -> Result<Schema> {
             check_object_is_readable_file(location);
             Ok(Schema::new(vec![
@@ -498,7 +490,7 @@ mod test {
 
             let src: StringArray = [args.src.clone()]
                 .iter()
-                .map(|item| Some(item.to_url_string()))
+                .map(|item| Some(item.to_url_string().unwrap()))
                 .collect();
             let batch_size: Int64Array = [args.batch_size]
                 .iter()

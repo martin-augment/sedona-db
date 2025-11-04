@@ -27,55 +27,148 @@ use datafusion_execution::object_store::ObjectStoreUrl;
 use datafusion_physical_expr::PhysicalExpr;
 use object_store::{ObjectMeta, ObjectStore};
 
+/// Simple file format specification
+///
+/// In DataFusion, various parts of the file format are split among the
+/// FileFormatFactory, the FileFormat, the FileSource, the FileOpener,
+/// and a few other traits. This trait is designed to provide a few
+/// important features of a natively implemented FileFormat but consolidating
+/// the components of implementing the format in the same place. This is
+/// intended to provide a less verbose way to implement readers for a wide
+/// variety of spatial formats.
 #[async_trait]
 pub trait RecordBatchReaderFormatSpec: Debug + Send + Sync {
-    fn extension(&self) -> &str;
+    /// Infer a schema for a given file
+    ///
+    /// Given a single file, infer what schema [RecordBatchReaderFormatSpec::open_reader]
+    /// would produce in the absence of any other guidance.
+    async fn infer_schema(&self, location: &Object) -> Result<Schema>;
+
+    /// Open a [RecordBatchReader] for a given file
+    ///
+    /// The implementation must handle the `file_projection`; however,
+    /// need not handle the `filters` (but may use them for pruning).
+    async fn open_reader(&self, args: &OpenReaderArgs)
+        -> Result<Box<dyn RecordBatchReader + Send>>;
+
+    /// A file extension or `""` if this concept does not apply
+    fn extension(&self) -> &str {
+        ""
+    }
+
+    /// Compute a clone of self but with the key/value options specified
+    ///
+    /// Implementations should error for invalid key/value input that does
+    /// not apply to this reader.
     fn with_options(
         &self,
         options: &HashMap<String, String>,
     ) -> Result<Arc<dyn RecordBatchReaderFormatSpec>>;
+
+    /// Fill in default options from [TableOptions]
+    ///
+    /// The TableOptions are a DataFusion concept that provide a means by which
+    /// options can be set for various table formats. If the defaults for a built-in
+    /// table format are reasonable to fill in or if Extensions have been set,
+    /// these can be accessed and used to fill default options. Note that any options
+    /// set with [RecordBatchReaderFormatSpec::with_options] should take precedent.
     fn with_table_options(
         &self,
-        table_options: &TableOptions,
-    ) -> Arc<dyn RecordBatchReaderFormatSpec>;
+        _table_options: &TableOptions,
+    ) -> Option<Arc<dyn RecordBatchReaderFormatSpec>> {
+        None
+    }
+
+    /// Allow repartitioning
+    ///
+    /// This allows an implementation to opt in to DataFusion's built-in file size
+    /// based partitioner, which works well for partitioning files where a simple
+    /// file plus byte range is sufficient. The default opts out of this feature
+    /// (i.e., every file is passed exactly one to [RecordBatchReaderFormatSpec::open_reader]
+    /// without a `range`).
     fn supports_repartition(&self) -> SupportsRepartition {
         SupportsRepartition::None
     }
-    async fn infer_schema(&self, location: &Object) -> Result<Schema>;
+
+    /// Infer [Statistics] for a given file
     async fn infer_stats(&self, _location: &Object, table_schema: &Schema) -> Result<Statistics> {
         Ok(Statistics::new_unknown(table_schema))
     }
-    async fn open_reader(&self, args: &OpenReaderArgs)
-        -> Result<Box<dyn RecordBatchReader + Send>>;
 }
 
+/// Enumerator for repartitioning support
 #[derive(Debug, Clone, Copy)]
 pub enum SupportsRepartition {
+    /// This implementation does not support repartitioning beyond the file level
     None,
+    /// This implementation supports partitioning by arbitrary ranges with a file
     ByRange,
 }
 
+/// Arguments to [RecordBatchReaderFormatSpec::open_reader]
 #[derive(Debug, Clone)]
 pub struct OpenReaderArgs {
+    /// The input file, or partial file if [SupportsRepartition::ByRange] is used
     pub src: Object,
+
+    /// The requested batch size
+    ///
+    /// DataFusion will usually fill this in to a default of 8192 or a user-specified
+    /// default in the session configuration.
     pub batch_size: Option<usize>,
+
+    /// The requested file schema, if specified
+    ///
+    /// DataFusion will usually fill this in to the schema inferred by
+    /// [RecordBatchReaderFormatSpec::infer_schema].
     pub file_schema: Option<SchemaRef>,
+
+    /// The requested field indices
+    ///
+    /// Implementations must handle this (e.g., using `RecordBatch::project`
+    /// or by implementing partial reads).
     pub file_projection: Option<Vec<usize>>,
+
+    /// Filter expressions
+    ///
+    /// Expressions that may be used for pruning. Implementations need not
+    /// apply these filters.
     pub filters: Vec<Arc<dyn PhysicalExpr>>,
 }
 
+/// The information required to specify a file or partial file
+///
+/// Depending exactly where in DataFusion we are calling in from, we might
+/// have various information about the file. In general, implementations should
+/// use [ObjectStore] and [ObjectMeta] to access the file to use DataFusion's
+/// registered IO for these protocols. When implementing a filename-based reader
+/// (e.g., that uses some external API to read files), use [Object::to_url_string].
 #[derive(Debug, Clone)]
 pub struct Object {
+    /// The object store reference
     pub store: Option<Arc<dyn ObjectStore>>,
+
+    /// A URL that may be used to retrieve an [ObjectStore] from a registry
+    ///
+    /// These URLs typically are populated only with the scheme.
     pub url: Option<ObjectStoreUrl>,
+
+    /// An individual object in an ObjectStore
     pub meta: Option<ObjectMeta>,
+
+    /// If this represents a partial file, the byte range within the file
+    ///
+    /// This is only set if partitioning other than `None` is provided
     pub range: Option<FileRange>,
 }
 
 impl Object {
-    pub fn to_url_string(&self) -> String {
+    /// Convert this object to a URL string, if possible
+    ///
+    /// Returns `None` if there is not suficient information in the Object to calculate
+    /// this.
+    pub fn to_url_string(&self) -> Option<String> {
         match (&self.url, &self.meta) {
-            (None, None) => format!("{:?}", self.store),
             (None, Some(meta)) => {
                 // There's no great way to map an object_store to a url prefix if we're not
                 // provided the `url`; however, this is what we have access to in the
@@ -85,15 +178,16 @@ impl Object {
                 // GDAL to be able to translate.
                 let object_store_debug = format!("{:?}", self.store).to_lowercase();
                 if object_store_debug.contains("http") {
-                    format!("https://{}", meta.location)
+                    Some(format!("https://{}", meta.location))
                 } else if object_store_debug.contains("local") {
-                    format!("file:///{}", meta.location)
+                    Some(format!("file:///{}", meta.location))
                 } else {
-                    format!("{object_store_debug}: {}", meta.location)
+                    None
                 }
             }
-            (Some(url), None) => url.to_string(),
-            (Some(url), Some(meta)) => format!("{url}/{}", meta.location),
+            (Some(url), None) => Some(url.to_string()),
+            (Some(url), Some(meta)) => Some(format!("{url}/{}", meta.location)),
+            (None, None) => None,
         }
     }
 }

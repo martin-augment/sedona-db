@@ -84,7 +84,12 @@ impl ReadOptions<'_> for RecordBatchReaderTableOptions {
         config: &SessionConfig,
         table_options: TableOptions,
     ) -> ListingOptions {
-        let format = RecordBatchReaderFormat::new(self.spec.with_table_options(&table_options));
+        let format = if let Some(modified) = self.spec.with_table_options(&table_options) {
+            RecordBatchReaderFormat::new(modified)
+        } else {
+            RecordBatchReaderFormat::new(self.spec.clone())
+        };
+
         ListingOptions::new(Arc::new(format))
             .with_file_extension(self.spec.extension())
             .with_session_config_options(config)
