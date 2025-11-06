@@ -28,7 +28,6 @@ use sedona_geos::wkb_to_geos::GEOSWkbFactory;
 use wkb::reader::Wkb;
 
 use crate::{
-    collect::BuildSideBatch,
     index::IndexQueryResult,
     refine::{
         exec_mode_selector::{get_or_update_execution_mode, ExecModeSelector, SelectOptimalMode},
@@ -342,23 +341,6 @@ impl IndexQueryResultRefiner for GeosRefiner {
                     "Speculative execution mode should be translated to other execution modes"
                 )
             }
-        }
-    }
-
-    fn estimate_max_memory_usage(&self, build_batches: &[BuildSideBatch]) -> usize {
-        if self.exec_mode.get().unwrap_or(&ExecutionMode::PrepareBuild)
-            == &ExecutionMode::PrepareBuild
-        {
-            // Only estimate memory usage when exec mode could be prepare-build.
-            let mut total_bytes = 0;
-            for build_batch in build_batches {
-                for wkb in build_batch.geom_array.wkbs().iter().flatten() {
-                    total_bytes += estimate_prep_geom_in_mem_size(wkb);
-                }
-            }
-            total_bytes
-        } else {
-            0
         }
     }
 

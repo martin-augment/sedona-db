@@ -25,20 +25,32 @@ use datafusion_common::{utils::proxy::VecAllocExt, Result};
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool, MemoryReservation};
 use datafusion_expr::JoinType;
 use futures::StreamExt;
-use geo_index::rtree::{sort::HilbertSort, RTreeBuilder};
+use geo_index::rtree::{sort::HilbertSort, RTree, RTreeBuilder};
 use parking_lot::Mutex;
 use std::sync::{atomic::AtomicUsize, Arc};
 
 use crate::{
-    collect::BuildPartition,
-    collect::BuildSideBatch,
-    index::knn_adapter::KnnComponents,
-    index::{spatial_index::SpatialIndex, RTreeBuildResult, RTREE_MEMORY_ESTIMATE_PER_RECT},
+    collect::{BuildPartition, BuildSideBatch},
+    index::{knn_adapter::KnnComponents, spatial_index::SpatialIndex},
     operand_evaluator::create_operand_evaluator,
     refine::create_refiner,
     spatial_predicate::SpatialPredicate,
-    utils::join_utils::need_produce_result_in_final,
+    utils::{
+        concurrent_reservation::ConcurrentReservation, join_utils::need_produce_result_in_final,
+    },
 };
+
+// Type aliases for better readability
+type SpatialRTree = RTree<f32>;
+type DataIdToBatchPos = Vec<(i32, i32)>;
+type RTreeBuildResult = (SpatialRTree, DataIdToBatchPos);
+
+/// Rough estimate for in-memory size of the rtree per rect in bytes
+const RTREE_MEMORY_ESTIMATE_PER_RECT: usize = 60;
+
+/// The prealloc size for the refiner reservation. This is used to reduce the frequency of growing
+/// the reservation when updating the refiner memory reservation.
+const REFINER_RESERVATION_PREALLOC_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
 /// Builder for constructing a SpatialIndex from geometry batches.
 ///
@@ -245,8 +257,11 @@ impl SpatialIndexBuilder {
             num_geoms,
             self.stats,
         );
-        let refiner_mem_usage = refiner.estimate_max_memory_usage(&self.indexed_batches);
-        self.reservation.try_grow(refiner_mem_usage)?;
+        let consumer = MemoryConsumer::new("SpatialJoinRefiner");
+        let refiner_reservation = consumer.register(&self.memory_pool);
+        let refiner_reservation =
+            ConcurrentReservation::try_new(REFINER_RESERVATION_PREALLOC_SIZE, refiner_reservation)
+                .unwrap();
 
         let cache_size = batch_pos_vec.len();
         let knn_components =
@@ -256,6 +271,7 @@ impl SpatialIndexBuilder {
             self.schema,
             evaluator,
             refiner,
+            refiner_reservation,
             rtree,
             batch_pos_vec,
             self.indexed_batches,

@@ -36,11 +36,14 @@ use wkb::reader::Wkb;
 
 use crate::{
     collect::BuildSideBatch,
-    index::knn_adapter::{KnnComponents, SedonaKnnAdapter},
-    index::{IndexQueryResult, QueryResultMetrics},
+    index::{
+        knn_adapter::{KnnComponents, SedonaKnnAdapter},
+        IndexQueryResult, QueryResultMetrics,
+    },
     operand_evaluator::{create_operand_evaluator, OperandEvaluator},
     refine::{create_refiner, IndexQueryResultRefiner},
     spatial_predicate::SpatialPredicate,
+    utils::concurrent_reservation::ConcurrentReservation,
 };
 use arrow::array::BooleanBufferBuilder;
 use sedona_common::{option::SpatialJoinOptions, ExecutionMode};
@@ -53,6 +56,9 @@ pub(crate) struct SpatialIndex {
 
     /// The refiner for refining the index query results.
     refiner: Arc<dyn IndexQueryResultRefiner>,
+
+    /// Memory reservation for tracking the memory usage of the refiner
+    refiner_reservation: ConcurrentReservation,
 
     /// R-tree index for the geometry batches. It takes MBRs as query windows and returns
     /// data indexes. These data indexes should be translated using `data_id_to_batch_pos` to get
@@ -97,7 +103,7 @@ impl SpatialIndex {
         schema: SchemaRef,
         options: SpatialJoinOptions,
         probe_threads_counter: AtomicUsize,
-        reservation: MemoryReservation,
+        mut reservation: MemoryReservation,
         memory_pool: Arc<dyn MemoryPool>,
     ) -> Self {
         let evaluator = create_operand_evaluator(&spatial_predicate, options.clone());
@@ -108,11 +114,14 @@ impl SpatialIndex {
             0,
             GeoStatistics::empty(),
         );
+        let refiner_reservation = reservation.split(0);
+        let refiner_reservation = ConcurrentReservation::try_new(0, refiner_reservation).unwrap();
         let rtree = RTreeBuilder::<f32>::new(0).finish::<HilbertSort>();
         Self {
             schema,
             evaluator,
             refiner,
+            refiner_reservation,
             rtree,
             data_id_to_batch_pos: Vec::new(),
             indexed_batches: Vec::new(),
@@ -129,6 +138,7 @@ impl SpatialIndex {
         schema: SchemaRef,
         evaluator: Arc<dyn OperandEvaluator>,
         refiner: Arc<dyn IndexQueryResultRefiner>,
+        refiner_reservation: ConcurrentReservation,
         rtree: RTree<f32>,
         data_id_to_batch_pos: Vec<(i32, i32)>,
         indexed_batches: Vec<BuildSideBatch>,
@@ -142,6 +152,7 @@ impl SpatialIndex {
             schema,
             evaluator,
             refiner,
+            refiner_reservation,
             rtree,
             data_id_to_batch_pos,
             indexed_batches,
@@ -452,6 +463,9 @@ impl SpatialIndex {
         let results = self.refiner.refine(probe_wkb, &index_query_results)?;
         let num_results = results.len();
         build_batch_positions.extend(results);
+
+        // Update refiner memory reservation
+        self.refiner_reservation.resize(self.refiner.mem_usage())?;
 
         Ok(QueryResultMetrics {
             count: num_results,
