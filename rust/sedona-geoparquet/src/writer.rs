@@ -28,7 +28,9 @@ use datafusion::{
         file_format::parquet::ParquetSink, physical_plan::FileSinkConfig, sink::DataSinkExec,
     },
 };
-use datafusion_common::{exec_datafusion_err, exec_err, not_impl_err, DataFusionError, Result};
+use datafusion_common::{
+    config::ConfigOptions, exec_datafusion_err, exec_err, not_impl_err, DataFusionError, Result,
+};
 use datafusion_expr::{dml::InsertOp, ColumnarValue, ScalarUDF, Volatility};
 use datafusion_physical_expr::{
     expressions::Column, LexRequirement, PhysicalExpr, ScalarFunctionExpr,
@@ -225,11 +227,14 @@ fn project_bboxes(
             column.return_field(&input_schema)?.as_ref(),
         )?) {
             let bbox_field_name = bbox_column_name(f.name());
+            // TODO: Pipe actual ConfigOptions from session instead of using defaults
+            // See: https://github.com/apache/sedona-db/issues/248
             let expr = Arc::new(ScalarFunctionExpr::new(
                 bbox_udf_name,
                 bbox_udf.clone(),
                 vec![column],
                 Arc::new(Field::new("", bbox_type(), true)),
+                Arc::new(ConfigOptions::default()),
             ));
 
             bbox_exprs.insert(i, (expr, bbox_field_name.clone()));
