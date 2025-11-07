@@ -22,16 +22,28 @@ use datafusion_common_runtime::JoinSet;
 use datafusion_execution::{memory_pool::MemoryReservation, SendableRecordBatchStream};
 use datafusion_physical_plan::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder};
 use futures::StreamExt;
+use sedona_expr::statistics::GeoStatistics;
 use sedona_functions::st_analyze_aggr::AnalyzeAccumulator;
 use sedona_schema::datatypes::WKB_GEOMETRY;
 
 use crate::{
-    collect::{
-        build_side_batch::BuildSideBatch,
-        build_side_batch_stream::in_mem::InMemoryBuildSideBatchStream, BuildPartition,
+    evaluated_batch::{
+        evaluated_batch_stream::{
+            in_mem::InMemoryEvaluatedBatchStream, SendableEvaluatedBatchStream,
+        },
+        EvaluatedBatch,
     },
     operand_evaluator::OperandEvaluator,
 };
+
+pub(crate) struct BuildPartition {
+    pub build_side_batch_stream: SendableEvaluatedBatchStream,
+    pub geo_statistics: GeoStatistics,
+
+    /// Memory reservation for tracking the memory usage of the build partition
+    /// Cleared on `BuildPartition` drop
+    pub reservation: MemoryReservation,
+}
 
 /// A collector for evaluating the spatial expression on build side batches and collect
 /// them as asynchronous streams with additional statistics. The asynchronous streams
@@ -81,7 +93,7 @@ impl BuildSideBatchesCollector {
         metrics: &CollectBuildSideMetrics,
     ) -> Result<BuildPartition> {
         let evaluator = self.evaluator.as_ref();
-        let mut in_mem_batches: Vec<BuildSideBatch> = Vec::new();
+        let mut in_mem_batches: Vec<EvaluatedBatch> = Vec::new();
         let mut analyzer = AnalyzeAccumulator::new(WKB_GEOMETRY, WKB_GEOMETRY);
 
         while let Some(record_batch) = stream.next().await {
@@ -95,7 +107,7 @@ impl BuildSideBatchesCollector {
                 analyzer.update_statistics(wkb, wkb.buf().len())?;
             }
 
-            let build_side_batch = BuildSideBatch {
+            let build_side_batch = EvaluatedBatch {
                 batch: record_batch,
                 geom_array,
             };
@@ -110,7 +122,7 @@ impl BuildSideBatchesCollector {
         }
 
         Ok(BuildPartition {
-            build_side_batch_stream: Box::pin(InMemoryBuildSideBatchStream::new(in_mem_batches)),
+            build_side_batch_stream: Box::pin(InMemoryEvaluatedBatchStream::new(in_mem_batches)),
             geo_statistics: analyzer.finish(),
             reservation,
         })

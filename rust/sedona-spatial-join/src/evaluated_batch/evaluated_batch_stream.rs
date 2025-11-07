@@ -15,22 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use datafusion_execution::memory_pool::MemoryReservation;
-use sedona_expr::statistics::GeoStatistics;
+use std::pin::Pin;
 
-mod build_side_batch;
-mod build_side_batch_stream;
-mod build_side_collector;
+use futures::Stream;
 
-pub(crate) use build_side_batch::BuildSideBatch;
-pub(crate) use build_side_batch_stream::SendableBuildSideBatchStream;
-pub(crate) use build_side_collector::{BuildSideBatchesCollector, CollectBuildSideMetrics};
+use crate::evaluated_batch::EvaluatedBatch;
+use datafusion_common::Result;
 
-pub(crate) struct BuildPartition {
-    pub build_side_batch_stream: SendableBuildSideBatchStream,
-    pub geo_statistics: GeoStatistics,
-
-    /// Memory reservation for tracking the memory usage of the build partition
-    /// Cleared on `BuildPartition` drop
-    pub reservation: MemoryReservation,
+/// A stream that produces [`EvaluatedBatch`] items. This stream may have purely in-memory or
+/// out-of-core implementations. The type of the stream could be queried calling `is_external()`.
+pub(crate) trait EvaluatedBatchStream: Stream<Item = Result<EvaluatedBatch>> {
+    /// Returns true if this stream is an external stream, where batch data were spilled to disk.
+    fn is_external(&self) -> bool;
 }
+
+pub(crate) type SendableEvaluatedBatchStream = Pin<Box<dyn EvaluatedBatchStream + Send>>;
+
+pub(crate) mod in_mem;

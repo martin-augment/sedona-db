@@ -16,44 +16,41 @@
 // under the License.
 
 use std::{
-    collections::VecDeque,
     pin::Pin,
     task::{Context, Poll},
+    vec::IntoIter,
 };
 
 use datafusion_common::Result;
 
-use crate::collect::{
-    build_side_batch::BuildSideBatch, build_side_batch_stream::BuildSideBatchStream,
-};
+use crate::evaluated_batch::{evaluated_batch_stream::EvaluatedBatchStream, EvaluatedBatch};
 
-/// A build side batch stream that holds all batches in memory.
-pub(crate) struct InMemoryBuildSideBatchStream {
-    batches: VecDeque<BuildSideBatch>,
+pub(crate) struct InMemoryEvaluatedBatchStream {
+    iter: IntoIter<EvaluatedBatch>,
 }
 
-impl InMemoryBuildSideBatchStream {
-    pub fn new(batches: Vec<BuildSideBatch>) -> Self {
-        InMemoryBuildSideBatchStream {
-            batches: VecDeque::from(batches),
+impl InMemoryEvaluatedBatchStream {
+    pub fn new(batches: Vec<EvaluatedBatch>) -> Self {
+        InMemoryEvaluatedBatchStream {
+            iter: batches.into_iter(),
         }
     }
 }
 
-impl BuildSideBatchStream for InMemoryBuildSideBatchStream {
+impl EvaluatedBatchStream for InMemoryEvaluatedBatchStream {
     fn is_external(&self) -> bool {
         false
     }
 }
 
-impl futures::Stream for InMemoryBuildSideBatchStream {
-    type Item = Result<BuildSideBatch>;
+impl futures::Stream for InMemoryEvaluatedBatchStream {
+    type Item = Result<EvaluatedBatch>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let front = self.get_mut().batches.pop_front();
-        match front {
-            Some(batch) => Poll::Ready(Some(Ok(batch))),
-            None => Poll::Ready(None),
-        }
+        self.get_mut()
+            .iter
+            .next()
+            .map(|batch| Poll::Ready(Some(Ok(batch))))
+            .unwrap_or(Poll::Ready(None))
     }
 }

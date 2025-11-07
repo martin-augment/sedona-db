@@ -30,8 +30,8 @@ use parking_lot::Mutex;
 use std::sync::{atomic::AtomicUsize, Arc};
 
 use crate::{
-    collect::{BuildPartition, BuildSideBatch},
-    index::{knn_adapter::KnnComponents, spatial_index::SpatialIndex},
+    evaluated_batch::EvaluatedBatch,
+    index::{knn_adapter::KnnComponents, spatial_index::SpatialIndex, BuildPartition},
     operand_evaluator::create_operand_evaluator,
     refine::create_refiner,
     spatial_predicate::SpatialPredicate,
@@ -68,7 +68,7 @@ pub(crate) struct SpatialIndexBuilder {
     metrics: SpatialJoinBuildMetrics,
 
     /// Batches to be indexed
-    indexed_batches: Vec<BuildSideBatch>,
+    indexed_batches: Vec<EvaluatedBatch>,
     /// Memory reservation for tracking the memory usage of the spatial index
     reservation: MemoryReservation,
 
@@ -129,7 +129,7 @@ impl SpatialIndexBuilder {
     ///
     /// This method accumulates geometry batches that will be used to build the spatial index.
     /// Each batch contains processed geometry data along with memory usage information.
-    pub fn add_batch(&mut self, indexed_batch: BuildSideBatch) {
+    pub fn add_batch(&mut self, indexed_batch: EvaluatedBatch) {
         let in_mem_size = indexed_batch.in_mem_size();
         self.indexed_batches.push(indexed_batch);
         self.reservation.grow(in_mem_size);
